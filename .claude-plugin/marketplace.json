@@ -5,8 +5,8 @@
     "url": "https://github.com/Jorgeescribanogarcia"
   },
   "metadata": {
-    "description": "Claude Code plugins by Jorgeescribanogarcia",
-    "version": "1.0.0"
+    "description": "JEG Claude Marketplace — Community plugins for Claude Code",
+    "version": "2.0.0"
   },
   "plugins": [
     {
