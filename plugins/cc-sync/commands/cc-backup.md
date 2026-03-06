@@ -1,4 +1,4 @@
-# /backup-config
+# /cc-backup
 
 Upload your configuration to GitHub
 
@@ -18,8 +18,8 @@ Look for any entry containing "github" in the output.
 ```
 ❌ GitHub MCP not found.
 
-Run /setup-config-sync first to configure the GitHub MCP,
-then restart Claude Code and run /backup-config again.
+Run /cc-setup first to configure the GitHub MCP,
+then restart Claude Code and run /cc-backup again.
 ```
 
 **If GitHub MCP IS found**, continue to Step 2.
@@ -34,8 +34,8 @@ Use the GitHub MCP to verify the authenticated user (e.g., call `get_me` or equi
 ```
 ❌ No active GitHub session.
 
-Run /setup-config-sync to configure your GitHub token,
-then restart Claude Code and run /backup-config again.
+Run /cc-setup to configure your GitHub token,
+then restart Claude Code and run /cc-backup again.
 ```
 
 **If authenticated**, save the username and continue.
