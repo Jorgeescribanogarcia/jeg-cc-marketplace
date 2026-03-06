@@ -12,13 +12,13 @@ claude plugin marketplace add https://github.com/Jorgeescribanogarcia/jeg-claude
 
 | Plugin | Description | Install |
 |--------|-------------|---------|
-| **claude-config-sync** | Backup and restore your Claude Code configuration to a private GitHub repo | `claude plugin install claude-config-sync@jeg` |
+| **cc-sync** | Backup and restore your Claude Code configuration to a private GitHub repo | `claude plugin install cc-sync@jeg` |
 
 ---
 
 ## Plugin Details
 
-### claude-config-sync
+### cc-sync
 
 Backup and restore your Claude Code configuration (settings, plugins, commands, skills, agents) to a private GitHub repository.
 
@@ -26,31 +26,31 @@ Backup and restore your Claude Code configuration (settings, plugins, commands, 
 
 | Command | Description |
 |---|---|
-| `/setup-config-sync` | First-time setup — configures GitHub token and MCP automatically |
-| `/backup-config` | Upload your configuration to GitHub |
-| `/restore-config` | Restore your configuration from GitHub |
-| `/config-status` | Show status and last backup date |
+| `/cc-setup` | First-time setup — configures GitHub token and MCP automatically |
+| `/cc-backup` | Upload your configuration to GitHub |
+| `/cc-restore` | Restore your configuration from GitHub |
+| `/cc-status` | Show status and last backup date |
 
 **Requirements:**
 - Claude Code v22+
-- A GitHub personal access token with `repo` scope (the `/setup-config-sync` command will guide you)
+- A GitHub personal access token with `repo` scope (the `/cc-setup` command will guide you)
 
 **Quick start:**
 
 ```
-claude plugin install claude-config-sync@jeg
+claude plugin install cc-sync@jeg
 ```
 
 Restart Claude Code, then run:
 
 ```
-/setup-config-sync
+/cc-setup
 ```
 
 **Uninstall:**
 
 ```
-claude plugin uninstall claude-config-sync@jeg
+claude plugin uninstall cc-sync@jeg
 ```
 
 Your backups on GitHub (the `claude-code-config` repo) are not affected.
