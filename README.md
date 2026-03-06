@@ -1,32 +1,22 @@
-# Claude-config-sync
+# JEG Claude Marketplace
 
-Claude Code plugin marketplace by Jorgeescribanogarcia.
+Community plugin marketplace for Claude Code.
 
-## Install
-
-Add this marketplace to Claude Code:
+## Install the marketplace
 
 ```
-claude plugin marketplace add https://github.com/Jorgeescribanogarcia/Claude-config-sync
+claude plugin marketplace add https://github.com/Jorgeescribanogarcia/jeg-claude-marketplace
 ```
 
-Then install the plugin:
+## Available Plugins
 
-```
-claude plugin install claude-config-sync@jeg
-```
-
-Restart Claude Code and run the setup:
-
-```
-/setup-config-sync
-```
-
-That's it. The setup command will ask for your GitHub token and configure everything automatically.
+| Plugin | Description | Install |
+|--------|-------------|---------|
+| **claude-config-sync** | Backup and restore your Claude Code configuration to a private GitHub repo | `claude plugin install claude-config-sync@jeg` |
 
 ---
 
-## Plugins
+## Plugin Details
 
 ### claude-config-sync
 
@@ -45,12 +35,32 @@ Backup and restore your Claude Code configuration (settings, plugins, commands, 
 - Claude Code v22+
 - A GitHub personal access token with `repo` scope (the `/setup-config-sync` command will guide you)
 
----
+**Quick start:**
 
-## Uninstall
+```
+claude plugin install claude-config-sync@jeg
+```
+
+Restart Claude Code, then run:
+
+```
+/setup-config-sync
+```
+
+**Uninstall:**
 
 ```
 claude plugin uninstall claude-config-sync@jeg
 ```
 
-That's it. All commands are loaded from the plugin cache, so uninstalling the plugin removes everything cleanly. Your backups on GitHub (the `claude-code-config` repo) are not affected.
+Your backups on GitHub (the `claude-code-config` repo) are not affected.
+
+---
+
+## Contributing
+
+Want to add a plugin to this marketplace? Open a PR with your plugin inside the `plugins/` directory following the existing structure.
+
+## Author
+
+[Jorgeescribanogarcia](https://github.com/Jorgeescribanogarcia)
