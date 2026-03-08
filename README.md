@@ -16,6 +16,10 @@ claude plugin marketplace add https://github.com/Jorgeescribanogarcia/jeg-claude
 
 ---
 
+## License
+
+This project is licensed under the [MIT License](LICENSE).
+
 ## Author
 
 [Jorgeescribanogarcia](https://github.com/Jorgeescribanogarcia)

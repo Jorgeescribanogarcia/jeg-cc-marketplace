@@ -35,3 +35,7 @@ claude plugin uninstall cc-cnf-sync@jeg
 ```
 
 Your backups on GitHub (the `claude-code-config` repo) are not affected.
+
+## License
+
+This plugin is licensed under the [MIT License](LICENSE).
