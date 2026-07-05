@@ -5,7 +5,7 @@ Community plugin marketplace for Claude Code.
 ## Install the marketplace
 
 ```
-claude plugin marketplace add https://github.com/Jorgeescribanogarcia/jeg-claude-marketplace
+claude plugin marketplace add https://github.com/Jorgeescribanogarcia/jeg-cc-marketplace
 ```
 
 ## Available Plugins

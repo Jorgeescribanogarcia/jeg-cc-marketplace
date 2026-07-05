@@ -16,6 +16,14 @@ Backup and restore your Claude Code configuration (settings, plugins, commands, 
 - Claude Code v22+
 - A GitHub personal access token with `repo` scope (the `/setup` command will guide you)
 
+## How setup works
+
+`/setup` validates your GitHub token against the GitHub API **before** installing the
+MCP, so an expired or wrong-scope token is caught up front instead of failing later.
+If no valid token is found, it drops a `githubToken.bat` helper for you to paste one
+in (keeping the secret out of the chat), then re-run `/setup`. After a successful
+setup, **restart Claude Code** so the MCP reconnects with the new token.
+
 ## Quick start
 
 ```
