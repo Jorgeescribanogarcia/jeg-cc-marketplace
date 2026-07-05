@@ -28,9 +28,12 @@ then restart Claude Code and run /backup again.
 
 ### STEP 2 — Verify GitHub session
 
-Use the GitHub MCP to verify the authenticated user (e.g., call `get_me` or equivalent).
+Call an **authenticated** GitHub MCP endpoint to confirm the session works — e.g.
+`search_repositories` with query `user:@me` (or `get_me` if the server exposes it).
+A merely *present* `github` MCP entry is NOT proof of a working session.
 
-**If unauthenticated or the call fails**, stop and show:
+**If the call fails with an authentication error** (e.g. "Bad credentials") or the
+MCP is not installed, stop and show:
 ```
 ❌ No active GitHub session.
 
