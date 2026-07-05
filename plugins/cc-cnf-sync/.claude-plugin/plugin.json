@@ -1,13 +1,13 @@
 {
   "name": "cc-cnf-sync",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Backup and restore Claude Code configuration to/from a private GitHub repository. Run /setup after installing.",
   "author": {
     "name": "Jorgeescribanogarcia",
     "url": "https://github.com/Jorgeescribanogarcia"
   },
-  "homepage": "https://github.com/Jorgeescribanogarcia/jeg-claude-marketplace",
-  "repository": "https://github.com/Jorgeescribanogarcia/jeg-claude-marketplace",
+  "homepage": "https://github.com/Jorgeescribanogarcia/jeg-cc-marketplace",
+  "repository": "https://github.com/Jorgeescribanogarcia/jeg-cc-marketplace",
   "license": "MIT",
   "keywords": ["backup", "config", "github", "sync", "restore"]
 }
