@@ -2,6 +2,8 @@
 
 Backup and restore your Claude Code configuration (settings, plugins, commands, skills, agents) to a private GitHub repository.
 
+Backups are **portable across machines**: instead of copying machine-specific plugin paths, `/backup` writes a small `plugins.json` manifest (which plugins, from which marketplaces), and `/restore` rebuilds them with the Claude Code CLI — so the same setup works under any username or OS.
+
 ## Commands
 
 | Command | Description |

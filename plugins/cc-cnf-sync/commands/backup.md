@@ -74,9 +74,7 @@ $SOURCE = "$env:USERPROFILE\.claude"
 $FILES_TO_BACKUP = @(
   "settings.json",
   "CLAUDE.md",
-  "keybindings.json",
-  "plugins\installed_plugins.json",
-  "plugins\known_marketplaces.json"
+  "keybindings.json"
 )
 
 foreach ($file in $FILES_TO_BACKUP) {
@@ -105,6 +103,61 @@ Write-Output $TEMP_DIR
 - `history.jsonl`
 - `~/.claude.json`
 - Any file containing "token", "secret", or "key" in its name
+- `plugins\installed_plugins.json` and `plugins\known_marketplaces.json` — these contain
+  **absolute, machine-specific paths** (`C:\Users\<you>\.claude\plugins\cache\...`) and a
+  local `cache\` that does not exist on other machines. They are intentionally replaced by
+  the portable manifest generated in the next step.
+
+---
+
+### STEP 4b — Generate a portable plugin manifest
+
+Instead of copying the machine-specific plugin JSONs, distill a portable manifest from the
+Claude Code CLI. It records only *what* is installed and *which marketplace* it came from —
+no absolute paths, no local cache dirs — so `/restore` can rebuild it on any machine/OS.
+
+```powershell
+$mp = claude plugin marketplace list --json | ConvertFrom-Json
+$pl = claude plugin list --json | ConvertFrom-Json
+
+$marketplaces = foreach ($m in $mp) {
+  # 'add' is the source string `claude plugin marketplace add` accepts:
+  #   github source -> "owner/repo", git source -> full clone URL.
+  if ($m.source -eq 'github' -and $m.repo) { $add = $m.repo }
+  elseif ($m.url)  { $add = $m.url }
+  elseif ($m.repo) { $add = $m.repo }
+  else { $add = $null }
+  [PSCustomObject]@{ name = $m.name; source = $m.source; add = $add }
+}
+
+$plugins = foreach ($p in $pl) {
+  [PSCustomObject]@{ id = $p.id; scope = $p.scope; enabled = $p.enabled }
+}
+
+[PSCustomObject]@{
+  schema       = 1
+  marketplaces = @($marketplaces)
+  plugins      = @($plugins)
+} | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $TEMP_DIR "plugins.json") -Encoding UTF8
+
+Get-Content (Join-Path $TEMP_DIR "plugins.json") -Raw
+```
+
+The resulting `plugins.json` looks like:
+```json
+{
+  "schema": 1,
+  "marketplaces": [
+    { "name": "claude-plugins-official", "source": "github", "add": "anthropics/claude-plugins-official" },
+    { "name": "jeg", "source": "git", "add": "https://github.com/Jorgeescribanogarcia/jeg-cc-marketplace.git" }
+  ],
+  "plugins": [
+    { "id": "cc-cnf-sync@jeg", "scope": "user", "enabled": true }
+  ]
+}
+```
+
+Upload `plugins.json` to the repo root alongside the other files.
 
 ---
 
@@ -148,7 +201,7 @@ Show progress as each file is uploaded.
 Included:
   ✓ settings.json
   ✓ CLAUDE.md
-  ✓ plugins/installed_plugins.json
+  ✓ plugins.json (portable manifest — <n> plugins, <m> marketplaces)
   ✓ commands/ (<n> files)
   ✓ skills/ (<n> files)
   ✓ agents/ (<n> files)
