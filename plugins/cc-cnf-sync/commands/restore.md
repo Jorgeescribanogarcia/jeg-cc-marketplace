@@ -1,6 +1,6 @@
 # /restore
 
-Restore your configuration from GitHub
+Restore your configuration from GitHub. Works on **Linux, macOS and Windows** (Git Bash).
 
 ## Steps to follow
 
@@ -70,7 +70,7 @@ Use the GitHub MCP to read `backup-meta.json` from the repo and show:
   🔗 Repository: https://github.com/<username>/claude-code-config
 
 ⚠️  This will overwrite your current configuration at:
-    %USERPROFILE%\.claude\
+    ~/.claude/
 
 Continue with restore? (reply: yes / no)
 ```
@@ -83,16 +83,17 @@ Wait for user confirmation. If the user replies anything other than affirmative,
 
 Before overwriting anything, back up the current config:
 
-```powershell
-$SAFETY_BACKUP = "$env:USERPROFILE\.claude-before-restore-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
-Copy-Item "$env:USERPROFILE\.claude" $SAFETY_BACKUP -Recurse -Force
-Write-Output "Safety backup created at: $SAFETY_BACKUP"
+```bash
+TS=$(date +%Y%m%d-%H%M%S)
+SAFETY_BACKUP="$HOME/.claude-before-restore-$TS"
+cp -r "$HOME/.claude" "$SAFETY_BACKUP"
+echo "Safety backup created at: $SAFETY_BACKUP"
 ```
 
 Show:
 ```
 🛡️  Safety backup created at:
-    %USERPROFILE%\.claude-before-restore-<timestamp>
+    ~/.claude-before-restore-<timestamp>
     (in case you need to roll back)
 ```
 
@@ -105,17 +106,17 @@ Use the GitHub MCP to list all files in the `claude-code-config` repository.
 For each file (excluding `backup-meta.json` **and** `plugins.json` — the latter is handled
 in STEP 7):
 1. Download the file content using the GitHub MCP
-2. Determine the correct local path under `%USERPROFILE%\.claude\`
+2. Determine the correct local path under `~/.claude/`
 3. Create any necessary subdirectories
 4. Write the file to the correct location
 
 Mapping:
-- `settings.json` → `%USERPROFILE%\.claude\settings.json`
-- `CLAUDE.md` → `%USERPROFILE%\.claude\CLAUDE.md`
-- `keybindings.json` → `%USERPROFILE%\.claude\keybindings.json`
-- `commands/*` → `%USERPROFILE%\.claude\commands\`
-- `skills/**` → `%USERPROFILE%\.claude\skills\`
-- `agents/**` → `%USERPROFILE%\.claude\agents\`
+- `settings.json` → `~/.claude/settings.json`
+- `CLAUDE.md` → `~/.claude/CLAUDE.md`
+- `keybindings.json` → `~/.claude/keybindings.json`
+- `commands/*` → `~/.claude/commands/`
+- `skills/**` → `~/.claude/skills/`
+- `agents/**` → `~/.claude/agents/`
 
 > **Do NOT restore** `installed_plugins.json` or `known_marketplaces.json`. Older backups may
 > still contain them; skip them if present. They hold absolute, machine-specific paths — the
@@ -131,30 +132,19 @@ If the repo contains `plugins.json`, use it to re-add marketplaces and reinstall
 the Claude Code CLI. This regenerates the correct local paths and cache for **this** machine —
 the whole point of the portable manifest.
 
-1. Download `plugins.json` and save it to a temp file, e.g. `$env:TEMP\cc-plugins.json`.
-2. Run:
+1. Download `plugins.json` (via the GitHub MCP) and read its contents.
+2. **First** add every marketplace (idempotent — ignore "already exists" errors), then
+   install every plugin. Run these commands per entry (you are the agent — iterate over the
+   manifest yourself; no shell JSON parsing needed):
 
-```powershell
-$manifest = Get-Content "$env:TEMP\cc-plugins.json" -Raw | ConvertFrom-Json
+```bash
+# For each marketplace with a non-empty "add":
+claude plugin marketplace add "<add>" --scope user
 
-# 1) Marketplaces first (idempotent — ignore "already exists" errors).
-foreach ($m in $manifest.marketplaces) {
-  if ([string]::IsNullOrWhiteSpace($m.add)) { continue }
-  Write-Host "  + marketplace: $($m.name) <- $($m.add)"
-  claude plugin marketplace add $m.add --scope user 2>&1 | Out-Null
-}
-
-# 2) Then the plugins.
-foreach ($p in $manifest.plugins) {
-  Write-Host "  + plugin: $($p.id)"
-  claude plugin install $p.id --scope user 2>&1 | Out-Null
-  # Honor a plugin that was disabled at backup time.
-  if ($p.PSObject.Properties.Name -contains 'enabled' -and $p.enabled -eq $false) {
-    claude plugin disable $p.id 2>&1 | Out-Null
-  }
-}
-
-Write-Host "Plugins rebuilt: $($manifest.plugins.Count) plugin(s), $($manifest.marketplaces.Count) marketplace(s)."
+# Then, for each plugin:
+claude plugin install "<id>" --scope user
+# If that plugin had "enabled": false at backup time, also run:
+claude plugin disable "<id>"
 ```
 
 If `plugins.json` is **absent** (legacy backup made before this version), tell the user their
@@ -175,5 +165,5 @@ reinstall plugins manually with `claude plugin install <name>@<marketplace>`.
 ⚠️  Restart Claude Code to apply all changes (plugins finish loading on restart).
 
 🛡️  If something looks wrong, your previous config is at:
-    %USERPROFILE%\.claude-before-restore-<timestamp>
+    ~/.claude-before-restore-<timestamp>
 ```
