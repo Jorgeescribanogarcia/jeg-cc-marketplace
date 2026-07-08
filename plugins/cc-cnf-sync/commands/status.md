@@ -38,7 +38,7 @@ If the GitHub MCP is not available or not authenticated:
 📊 Configuration Status — Claude Code
 
 🖥️  Local version: <claude --version>
-📁 Config path: %USERPROFILE%\.claude\
+📁 Config path: ~/.claude/
 
 INSTALLED PLUGINS:
   <list from claude plugin list>

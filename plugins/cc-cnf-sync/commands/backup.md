@@ -1,6 +1,6 @@
 # /backup
 
-Upload your configuration to GitHub
+Upload your configuration to GitHub. Works on **Linux, macOS and Windows** (Git Bash).
 
 ## Steps to follow
 
@@ -64,37 +64,25 @@ Show:
 
 ### STEP 4 — Collect configuration files
 
-Run the following PowerShell to collect all config files into a temp directory:
+Run the following `bash` to collect all config files into a temp directory. This works
+on Linux, macOS and Windows (Git Bash), where `~/.claude` maps to the right place:
 
-```powershell
-$TEMP_DIR = "$env:TEMP\claude-config-backup-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
-New-Item -ItemType Directory -Path $TEMP_DIR -Force | Out-Null
+```bash
+TS=$(date +%Y%m%d-%H%M%S)
+TEMP_DIR="${TMPDIR:-/tmp}/claude-config-backup-$TS"
+mkdir -p "$TEMP_DIR"
 
-$SOURCE = "$env:USERPROFILE\.claude"
-$FILES_TO_BACKUP = @(
-  "settings.json",
-  "CLAUDE.md",
-  "keybindings.json"
-)
+SOURCE="$HOME/.claude"
 
-foreach ($file in $FILES_TO_BACKUP) {
-  $src = Join-Path $SOURCE $file
-  $dst = Join-Path $TEMP_DIR $file
-  if (Test-Path $src) {
-    $dstDir = Split-Path $dst -Parent
-    New-Item -ItemType Directory -Path $dstDir -Force | Out-Null
-    Copy-Item $src $dst -Force
-  }
-}
+for f in settings.json CLAUDE.md keybindings.json; do
+  [ -f "$SOURCE/$f" ] && cp "$SOURCE/$f" "$TEMP_DIR/$f"
+done
 
-foreach ($dir in @("commands", "skills", "agents")) {
-  $srcDir = Join-Path $SOURCE $dir
-  if (Test-Path $srcDir) {
-    Copy-Item $srcDir (Join-Path $TEMP_DIR $dir) -Recurse -Force
-  }
-}
+for d in commands skills agents; do
+  [ -d "$SOURCE/$d" ] && cp -r "$SOURCE/$d" "$TEMP_DIR/$d"
+done
 
-Write-Output $TEMP_DIR
+echo "$TEMP_DIR"
 ```
 
 **IMPORTANT — Never include these files:**
@@ -103,10 +91,11 @@ Write-Output $TEMP_DIR
 - `history.jsonl`
 - `~/.claude.json`
 - Any file containing "token", "secret", or "key" in its name
-- `plugins\installed_plugins.json` and `plugins\known_marketplaces.json` — these contain
-  **absolute, machine-specific paths** (`C:\Users\<you>\.claude\plugins\cache\...`) and a
-  local `cache\` that does not exist on other machines. They are intentionally replaced by
-  the portable manifest generated in the next step.
+- `plugins/installed_plugins.json` and `plugins/known_marketplaces.json` — these contain
+  **absolute, machine-specific paths** (e.g. `/home/<you>/.claude/plugins/cache/...` or
+  `C:\Users\<you>\.claude\plugins\cache\...`) and a local `cache/` that does not exist on
+  other machines. They are intentionally replaced by the portable manifest generated in the
+  next step.
 
 ---
 
@@ -116,32 +105,22 @@ Instead of copying the machine-specific plugin JSONs, distill a portable manifes
 Claude Code CLI. It records only *what* is installed and *which marketplace* it came from —
 no absolute paths, no local cache dirs — so `/restore` can rebuild it on any machine/OS.
 
-```powershell
-$mp = claude plugin marketplace list --json | ConvertFrom-Json
-$pl = claude plugin list --json | ConvertFrom-Json
+Run these two commands and read their JSON output:
 
-$marketplaces = foreach ($m in $mp) {
-  # 'add' is the source string `claude plugin marketplace add` accepts:
-  #   github source -> "owner/repo", git source -> full clone URL.
-  if ($m.source -eq 'github' -and $m.repo) { $add = $m.repo }
-  elseif ($m.url)  { $add = $m.url }
-  elseif ($m.repo) { $add = $m.repo }
-  else { $add = $null }
-  [PSCustomObject]@{ name = $m.name; source = $m.source; add = $add }
-}
-
-$plugins = foreach ($p in $pl) {
-  [PSCustomObject]@{ id = $p.id; scope = $p.scope; enabled = $p.enabled }
-}
-
-[PSCustomObject]@{
-  schema       = 1
-  marketplaces = @($marketplaces)
-  plugins      = @($plugins)
-} | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $TEMP_DIR "plugins.json") -Encoding UTF8
-
-Get-Content (Join-Path $TEMP_DIR "plugins.json") -Raw
+```bash
+claude plugin marketplace list --json
+claude plugin list --json
 ```
+
+Then **build `plugins.json` yourself** (you are the agent — construct the JSON directly from
+the command output; do not rely on `jq`/`python` being installed) and write it to
+`$TEMP_DIR/plugins.json` with this schema:
+
+- `marketplaces[]`: one entry per marketplace with `name`, `source`, and `add`, where `add`
+  is the source string that `claude plugin marketplace add` accepts:
+  - github source → `"owner/repo"` (from the marketplace's `repo` field)
+  - git source → the full clone URL (from the marketplace's `url` field)
+- `plugins[]`: one entry per installed plugin with `id`, `scope`, and `enabled`.
 
 The resulting `plugins.json` looks like:
 ```json
@@ -163,13 +142,14 @@ Upload `plugins.json` to the repo root alongside the other files.
 
 ### STEP 5 — Add metadata file
 
-Create a file called `backup-meta.json` in the temp directory:
+Create a file called `backup-meta.json` in the temp directory. Fill the fields from these
+commands: `claude --version`, `uname -s` (OS, prints "Windows" if it fails), and `hostname`.
 
 ```json
 {
   "backup_date": "<ISO timestamp>",
   "claude_version": "<output of: claude --version>",
-  "os": "Windows",
+  "os": "<Linux | Darwin | Windows>",
   "hostname": "<output of: hostname>"
 }
 ```
