@@ -12,7 +12,7 @@ claude plugin marketplace add https://github.com/Jorgeescribanogarcia/jeg-cc-mar
 
 | Plugin | Description | Install |
 |--------|-------------|---------|
-| [**cc-cnf-sync**](plugins/cc-cnf-sync/README.md) | Backup and restore your Claude Code configuration to a private GitHub repo | `claude plugin install cc-cnf-sync@jeg` |
+| [**cc-cnf-sync**](plugins/cc-cnf-sync/README.md) | Backup and restore your Claude Code configuration to a private GitHub repo — portable across machines and OSes (Linux, macOS, Windows) | `claude plugin install cc-cnf-sync@jeg` |
 
 ---
 
