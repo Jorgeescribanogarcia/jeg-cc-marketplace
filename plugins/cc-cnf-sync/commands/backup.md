@@ -96,6 +96,9 @@ echo "$TEMP_DIR"
   `C:\Users\<you>\.claude\plugins\cache\...`) and a local `cache/` that does not exist on
   other machines. They are intentionally replaced by the portable manifest generated in the
   next step.
+- Session transcripts — `projects/<slug>/*.jsonl` (and any other files directly under a project
+  dir). These are large and may contain secrets pasted into the chat. Only each project's
+  `memory/` subfolder is backed up (STEP 4c), never the raw sessions.
 
 ---
 
@@ -140,53 +143,96 @@ Upload `plugins.json` to the repo root alongside the other files.
 
 ---
 
-### STEP 4c — Local memory (opt-in)
+### STEP 4c — Collect per-project memory (keyed by a portable, OS-independent identity)
 
-Claude Code's persistent **local memory** lives under `~/.claude/projects/<slug>/memory/`
-(each project has its own `memory/` folder with `MEMORY.md` plus individual fact files).
-This is **not** the per-project `CLAUDE.md` files (those live inside each project's own repo)
-— it's the machine-local memory Claude accumulates while you work.
+Persistent memory is **per project**: it lives at `~/.claude/projects/<slug>/memory/*.md`, where
+`<slug>` is the project's absolute path with separators replaced. That slug is path- and OS-specific
+(Windows `D--...-marketplace` ≠ Linux `-home-jorge-marketplace`), so keying by slug alone can't
+follow the project to another machine. Instead we key each project's memory by a **stable identity**:
+the normalized **git remote URL** (identical on every clone/OS), falling back to the folder name.
 
-**Ask the user first** (memory can contain personal notes, so it is opt-in):
-```
-🧠 Include local memory in this backup?
-
-   This backs up ~/.claude/projects/*/memory/ (Claude's accumulated
-   local memory), not the CLAUDE.md files of each project.
-
-Include memory? (reply: yes / no)
-```
-
-**If the user replies no**, skip this step (do not collect any memory).
-
-**If the user replies yes**, run this `bash` to collect every non-empty `memory/` folder,
-preserving its project slug. Works on Linux, macOS and Windows (Git Bash):
+The `SessionStart` hook (`hooks/attach-memory.sh`) recomputes this same key on the target machine and
+re-attaches the memory automatically. Run this `bash` (works on Linux, macOS and Windows via Git Bash);
+the key rules **must stay identical** to `norm_key()` in `hooks/attach-memory.sh`:
 
 ```bash
 SOURCE_PROJECTS="$HOME/.claude/projects"
 MEM_DEST="$TEMP_DIR/memory"
-mem_count=0
+
+# Normalize a git remote (or folder name) into an OS-independent key.
+# MUST stay identical to norm_key() in hooks/attach-memory.sh.
+norm_key() {
+  k=$1
+  case "$k" in *.git) k=${k%.git} ;; esac
+  case "$k" in *@*:*) host=${k#*@}; host=${host%%:*}; path=${k#*:}; k="$host/$path" ;; esac
+  k=$(printf '%s' "$k" | sed -E 's#^[a-zA-Z]+://##; s#^[^@/]*@##')
+  printf '%s' "$k" | tr 'A-Z' 'a-z'
+}
+
+entries=""
+count=0
 if [ -d "$SOURCE_PROJECTS" ]; then
   for pdir in "$SOURCE_PROJECTS"/*/; do
     mdir="${pdir}memory"
-    if [ -d "$mdir" ] && [ -n "$(ls -A "$mdir" 2>/dev/null)" ]; then
-      slug=$(basename "$pdir")
-      mkdir -p "$MEM_DEST/$slug"
-      cp -r "$mdir/." "$MEM_DEST/$slug/"
-      mem_count=$((mem_count+1))
+    [ -d "$mdir" ] || continue
+    [ -n "$(find "$mdir" -type f 2>/dev/null | head -n1)" ] || continue
+    fcount=$(find "$mdir" -type f 2>/dev/null | wc -l | tr -d ' ')
+    slug=$(basename "$pdir")
+
+    # Recover the project's real cwd from ANY session transcript (the slug can't be reversed
+    # reliably, and the first .jsonl may be a summary sidecar with no cwd — so scan them all).
+    cwd=$(sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$pdir"*.jsonl 2>/dev/null | head -n1)
+    cwd=$(printf '%s' "$cwd" | sed 's#\\\\#\\#g' | tr '\\' '/')
+
+    key=""
+    if [ -n "$cwd" ]; then
+      remote=$(git -C "$cwd" remote get-url origin 2>/dev/null)
+      if [ -n "$remote" ]; then
+        key=$(norm_key "$remote")
+      else
+        key="local/$(basename "$cwd" | tr 'A-Z' 'a-z')"
+      fi
     fi
+    [ -n "$key" ] || key="slug/$(printf '%s' "$slug" | tr 'A-Z' 'a-z')"   # last resort
+    safe=$(printf '%s' "$key" | sed 's/[^a-z0-9._-]/-/g')
+    if [ -n "$cwd" ]; then name=$(basename "$cwd"); else name=$slug; fi
+
+    mkdir -p "$MEM_DEST/$safe"
+    cp -r "$mdir/." "$MEM_DEST/$safe/"
+
+    [ -n "$entries" ] && entries="$entries,"
+    entries="$entries
+    { \"slug\": \"$slug\", \"key\": \"$key\", \"safeKey\": \"$safe\", \"name\": \"$name\", \"files\": $fcount }"
+    count=$((count+1))
   done
 fi
-echo "Memory projects collected: $mem_count"
+
+printf '{\n  "schema": 2,\n  "projects": [%s\n  ]\n}\n' "$entries" > "$TEMP_DIR/memory-manifest.json"
+echo "Memory: $count project(s) collected."
 ```
 
-The collected `memory/<slug>/...` files will be uploaded together with the rest in STEP 6.
+This writes each project's notes to `memory/<safeKey>/...` in the temp dir plus a
+`memory-manifest.json` at the root, e.g.:
+```json
+{
+  "schema": 2,
+  "projects": [
+    {
+      "slug": "D--Windows-Usuarios-Elmister180-Escritorio-jeg-agents-marketplace",
+      "key": "github.com/jorgeescribanogarcia/jeg-agents-marketplace",
+      "safeKey": "github.com-jorgeescribanogarcia-jeg-agents-marketplace",
+      "name": "jeg-agents-marketplace",
+      "files": 3
+    }
+  ]
+}
+```
 
-> **Note on portability:** the `<slug>` is the project's absolute path with slashes replaced
-> by dashes (e.g. `/home/jorge/Escritorio/app` → `-home-jorge-Escritorio-app`). Memory
-> re-attaches on restore only when the same project sits at the **same absolute path** on the
-> destination machine (a different username or OS changes the slug). The backup/restore tooling
-> itself is fully cross-platform.
+Upload the `memory/` tree and `memory-manifest.json` to the repo alongside the other files.
+
+> **Portability:** because memory is keyed by the git remote (not the path), the `SessionStart` hook
+> can re-attach it on any machine/OS where the same repo is checked out — regardless of where it lives
+> on disk. Projects with no git remote fall back to a folder-name key (works if the folder name matches).
 
 ---
 
@@ -232,6 +278,7 @@ Included:
   ✓ settings.json
   ✓ CLAUDE.md
   ✓ plugins.json (portable manifest — <n> plugins, <m> marketplaces)
+  ✓ memory/ (<n> project(s), <k> notes)
   ✓ commands/ (<n> files)
   ✓ skills/ (<n> files)
   ✓ agents/ (<n> files)
@@ -241,4 +288,5 @@ Excluded for security:
   ⊘ .credentials.json
   ⊘ settings.local.json
   ⊘ history.jsonl
+  ⊘ session transcripts (projects/*.jsonl)
 ```
