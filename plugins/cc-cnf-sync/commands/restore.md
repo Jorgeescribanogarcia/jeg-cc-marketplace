@@ -103,8 +103,8 @@ Show:
 
 Use the GitHub MCP to list all files in the `claude-code-config` repository.
 
-For each file (excluding `backup-meta.json` **and** `plugins.json` — the latter is handled
-in STEP 7):
+For each file (excluding `backup-meta.json`, `plugins.json` — handled in STEP 7 — **and**
+anything under `memory/` — handled in STEP 6b):
 1. Download the file content using the GitHub MCP
 2. Determine the correct local path under `~/.claude/`
 3. Create any necessary subdirectories
@@ -123,6 +123,51 @@ Mapping:
 > portable `plugins.json` (STEP 7) rebuilds plugins correctly for *this* machine instead.
 
 Show progress as each file is restored.
+
+---
+
+### STEP 6b — Restore local memory (opt-in)
+
+If the backup contains a `memory/` folder, offer to restore Claude Code's persistent
+**local memory** (the `~/.claude/projects/<slug>/memory/` folders — **not** the per-project
+`CLAUDE.md` files).
+
+If there is **no** `memory/` folder in the backup, skip this step silently.
+
+Otherwise **ask the user first**:
+```
+🧠 This backup includes local memory (<n> project(s)).
+
+⚠️  Restoring will OVERWRITE the memory of each matching project on this
+    machine (files present here but not in the backup are removed for those
+    projects). Projects not in the backup are left untouched.
+
+Import memory? (reply: yes / no)
+```
+
+**If the user replies no**, skip this step.
+
+**If the user replies yes**, restore each backed-up project's memory with **overwrite**
+semantics — for every `<slug>` present under `memory/` in the backup:
+
+1. Wipe the destination memory folder for that slug and recreate it empty:
+   ```bash
+   MDIR="$HOME/.claude/projects/<slug>/memory"
+   rm -rf "$MDIR"
+   mkdir -p "$MDIR"
+   ```
+2. Download each file under `memory/<slug>/` (via the GitHub MCP) and write it to
+   `~/.claude/projects/<slug>/memory/<file>`, creating any subdirectories.
+
+Only touch slugs that exist in the backup — never delete memory for projects that are not
+in the backup.
+
+> **Portability note:** the `<slug>` encodes the project's absolute path. Restored memory
+> only re-attaches when the same project lives at the same absolute path on this machine
+> (a different username or OS yields a different slug). This is inherent to how Claude Code
+> keys memory; the restore tooling itself works on Linux, macOS and Windows.
+
+Show progress as each memory file is restored.
 
 ---
 
@@ -159,6 +204,7 @@ reinstall plugins manually with `claude plugin install <name>@<marketplace>`.
 ✅ Restore completed
 
 📁 Files restored: <count>
+🧠 Memory restored: <n> project(s)   ← only if the user opted in; omit this line otherwise
 🔌 Plugins rebuilt: <n> plugin(s) from <m> marketplace(s)
 📅 Backup applied: <backup_date>
 

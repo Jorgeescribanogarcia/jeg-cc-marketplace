@@ -4,6 +4,12 @@ Backup and restore your Claude Code configuration (settings, plugins, commands, 
 
 Backups are **portable across machines**: instead of copying machine-specific plugin paths, `/backup` writes a small `plugins.json` manifest (which plugins, from which marketplaces), and `/restore` rebuilds them with the Claude Code CLI — so the same setup works under any username or OS.
 
+**Optional local memory sync:** `/backup` and `/restore` can also carry Claude Code's persistent
+local memory (`~/.claude/projects/*/memory/`, *not* the per-project `CLAUDE.md` files). It's
+**opt-in on both sides** — you're asked whether to include it when backing up and whether to
+import it when restoring. Memory re-attaches to a project when it sits at the same absolute
+path on the destination machine.
+
 **Cross-platform:** works on **Linux, macOS and Windows**. Everything runs through `bash`
 (on Windows, Claude Code uses Git Bash), and `~/.claude` resolves to the right location on
 every OS — no PowerShell required.
