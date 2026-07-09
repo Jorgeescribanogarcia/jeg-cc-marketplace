@@ -107,6 +107,9 @@ Write-Output $TEMP_DIR
   **absolute, machine-specific paths** (`C:\Users\<you>\.claude\plugins\cache\...`) and a
   local `cache\` that does not exist on other machines. They are intentionally replaced by
   the portable manifest generated in the next step.
+- Session transcripts — `projects\<slug>\*.jsonl` (and any other files directly under a project
+  dir). These are large and may contain secrets pasted into the chat. Only each project's
+  `memory\` subfolder is backed up (STEP 4c), never the raw sessions.
 
 ---
 
@@ -161,6 +164,98 @@ Upload `plugins.json` to the repo root alongside the other files.
 
 ---
 
+### STEP 4c — Collect per-project memory (keyed by a portable, OS-independent identity)
+
+Persistent memory is **per project**: it lives at `~/.claude/projects/<slug>/memory/*.md`, where
+`<slug>` is the project's absolute path with separators replaced. That slug is path- and OS-specific
+(Windows `D--...-marketplace` ≠ Linux `-home-jorge-marketplace`), so keying by slug alone can't
+follow the project to another machine. Instead we key each project's memory by a **stable identity**:
+the normalized **git remote URL** (identical on every clone/OS), falling back to the folder name.
+
+The `SessionStart` hook (`hooks/attach-memory.sh`) recomputes this same key on the target machine and
+re-attaches the memory automatically — see STEP 4c's key rules; the hook mirrors them exactly.
+
+```powershell
+$PROJECTS = Join-Path $SOURCE "projects"
+$memProjects = @()
+
+# Normalize a git remote (or folder name) into an OS-independent key.
+# MUST stay identical to norm_key() in hooks/attach-memory.sh.
+function Get-StableKey {
+  param([string]$cwd)
+  $key = $null
+  if ($cwd -and (Test-Path $cwd)) {
+    $remote = (& git -C $cwd remote get-url origin 2>$null)
+    if ($LASTEXITCODE -eq 0 -and $remote) {
+      $k = $remote.Trim()
+      if ($k.EndsWith('.git')) { $k = $k.Substring(0, $k.Length - 4) }
+      if ($k -match '^[^/@]+@([^:]+):(.+)$') { $k = "$($Matches[1])/$($Matches[2])" } # git@host:owner/repo
+      $k = $k -replace '^[a-zA-Z]+://', '' -replace '^[^@/]*@', ''                    # scheme + user@
+      $key = $k.ToLower()
+    }
+  }
+  if (-not $key -and $cwd) { $key = "local/$((Split-Path $cwd -Leaf).ToLower())" }
+  return $key
+}
+
+if (Test-Path $PROJECTS) {
+  foreach ($proj in Get-ChildItem $PROJECTS -Directory) {
+    $memDir = Join-Path $proj.FullName "memory"
+    if (-not (Test-Path $memDir)) { continue }
+    $files = @(Get-ChildItem $memDir -File -Recurse -ErrorAction SilentlyContinue)
+    if ($files.Count -eq 0) { continue }
+
+    # Recover the project's real cwd from ANY session transcript (the slug can't be reversed
+    # reliably, and the first .jsonl may be a summary sidecar with no cwd — so scan them all).
+    $cwd = $null
+    $m = Select-String -Path (Join-Path $proj.FullName '*.jsonl') -Pattern '"cwd":"([^"]*)"' -List |
+         Select-Object -First 1
+    if ($m) { $cwd = $m.Matches[0].Groups[1].Value -replace '\\\\','\' }
+
+    $key = Get-StableKey $cwd
+    if (-not $key) { $key = "slug/$($proj.Name.ToLower())" }   # last resort
+    $safe = ($key -replace '[^a-z0-9._-]','-')
+    $name = if ($cwd) { Split-Path $cwd -Leaf } else { $proj.Name }
+
+    $dst = Join-Path $TEMP_DIR "memory\$safe"
+    New-Item -ItemType Directory -Path $dst -Force | Out-Null
+    Copy-Item (Join-Path $memDir '*') $dst -Recurse -Force
+
+    $memProjects += [PSCustomObject]@{ slug = $proj.Name; key = $key; safeKey = $safe; name = $name; files = $files.Count }
+  }
+}
+
+[PSCustomObject]@{ schema = 2; projects = @($memProjects) } |
+  ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $TEMP_DIR "memory-manifest.json") -Encoding UTF8
+
+Write-Output "Memory: $($memProjects.Count) project(s) collected."
+```
+
+This writes each project's notes to `memory/<safeKey>/...` in the temp dir plus a
+`memory-manifest.json` at the root, e.g.:
+```json
+{
+  "schema": 2,
+  "projects": [
+    {
+      "slug": "D--Windows-Usuarios-Elmister180-Escritorio-jeg-agents-marketplace",
+      "key": "github.com/jorgeescribanogarcia/jeg-agents-marketplace",
+      "safeKey": "github.com-jorgeescribanogarcia-jeg-agents-marketplace",
+      "name": "jeg-agents-marketplace",
+      "files": 3
+    }
+  ]
+}
+```
+
+Upload the `memory/` tree and `memory-manifest.json` to the repo alongside the other files.
+
+> **Portability:** because memory is keyed by the git remote (not the path), the `SessionStart` hook
+> can re-attach it on any machine/OS where the same repo is checked out — regardless of where it lives
+> on disk. Projects with no git remote fall back to a folder-name key (works if the folder name matches).
+
+---
+
 ### STEP 5 — Add metadata file
 
 Create a file called `backup-meta.json` in the temp directory:
@@ -202,6 +297,7 @@ Included:
   ✓ settings.json
   ✓ CLAUDE.md
   ✓ plugins.json (portable manifest — <n> plugins, <m> marketplaces)
+  ✓ memory/ (<n> project(s), <k> notes)
   ✓ commands/ (<n> files)
   ✓ skills/ (<n> files)
   ✓ agents/ (<n> files)
@@ -210,4 +306,5 @@ Excluded for security:
   ⊘ .credentials.json
   ⊘ settings.local.json
   ⊘ history.jsonl
+  ⊘ session transcripts (projects/*.jsonl)
 ```

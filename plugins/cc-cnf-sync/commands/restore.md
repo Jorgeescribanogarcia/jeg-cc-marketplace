@@ -102,8 +102,8 @@ Show:
 
 Use the GitHub MCP to list all files in the `claude-code-config` repository.
 
-For each file (excluding `backup-meta.json` **and** `plugins.json` — the latter is handled
-in STEP 7):
+For each file (excluding `backup-meta.json`, `plugins.json`, `memory-manifest.json`, and
+anything under `memory/` — plugins are handled in STEP 7 and memory in STEP 7b):
 1. Download the file content using the GitHub MCP
 2. Determine the correct local path under `%USERPROFILE%\.claude\`
 3. Create any necessary subdirectories
@@ -163,6 +163,40 @@ reinstall plugins manually with `claude plugin install <name>@<marketplace>`.
 
 ---
 
+### STEP 7b — Restore per-project memory (same-machine)
+
+This step re-seats memory onto **this** machine's project slugs. Cross-machine / cross-OS attach is
+handled automatically by the `SessionStart` hook (see below) — you don't need to do anything for that.
+
+If the repo has a `memory-manifest.json`, use it to map each backed-up project's `safeKey` to its
+original `slug`, then restore the notes:
+
+1. Download `memory-manifest.json`. Its schema-2 entries look like
+   `{ "slug": "...", "safeKey": "...", "name": "...", "files": N }`.
+2. For each entry, list files under `memory/<safeKey>/` in the repo, download each, and write it to
+   `%USERPROFILE%\.claude\projects\<slug>\memory\<file>`:
+
+```powershell
+# $slug/$safeKey come from a manifest entry; $file/$content come from memory/<safeKey>/<file>.
+$dst = Join-Path $env:USERPROFILE ".claude\projects\$slug\memory\$file"
+New-Item -ItemType Directory -Path (Split-Path $dst -Parent) -Force | Out-Null
+Set-Content -Path $dst -Value $content -Encoding UTF8
+```
+
+If the manifest is **schema 1** (legacy: `memory/<slug>/...`, no `safeKey`), fall back to using the
+`slug` as the folder name. If no `memory-manifest.json` exists at all, skip this step silently.
+
+> **The hook is what makes memory portable across machines/OS.** Even if this same-machine step maps
+> nothing (e.g. you're restoring on a brand-new Linux box where the slugs differ), the plugin's
+> `SessionStart` hook re-attaches each project's memory by its git-remote key the moment you open it —
+> pulling from your `claude-code-config` backup automatically. It needs `git`, `curl`, and a valid
+> `GITHUB_PERSONAL_ACCESS_TOKEN` (the same one `/setup` configures) on that machine.
+>
+> This step overwrites memory only for projects present in the backup; others are left untouched, and
+> the STEP 5 safety backup preserves the old `.claude` for rollback.
+
+---
+
 ### STEP 8 — Final summary
 
 ```
@@ -170,6 +204,7 @@ reinstall plugins manually with `claude plugin install <name>@<marketplace>`.
 
 📁 Files restored: <count>
 🔌 Plugins rebuilt: <n> plugin(s) from <m> marketplace(s)
+🧠 Memory restored: <k> note(s) across <n> project(s)
 📅 Backup applied: <backup_date>
 
 ⚠️  Restart Claude Code to apply all changes (plugins finish loading on restart).

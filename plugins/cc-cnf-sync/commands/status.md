@@ -26,6 +26,8 @@ claude mcp list
 If the GitHub MCP is available and the session is active:
 - Use the GitHub MCP to read `backup-meta.json` from the `claude-code-config` repository
 - Extract: `backup_date`, `hostname`, `claude_version`
+- Also read `memory-manifest.json` if present, and sum `projects[].files` for a note count
+  (treat as 0 / "—" if the file is absent)
 
 If the GitHub MCP is not available or not authenticated:
 - Show: `Could not connect to GitHub — run /setup first`
@@ -50,6 +52,7 @@ LAST GITHUB BACKUP:
   📅 Date: <backup_date or "Never">
   🖥️  Machine: <hostname or "—">
   🔖 Version: <claude_version or "—">
+  🧠 Memory: <k note(s) across n project(s), or "—">
   🔗 Repo: https://github.com/<username>/claude-code-config
 
 DAYS SINCE LAST BACKUP: <days or "N/A">
