@@ -140,6 +140,56 @@ Upload `plugins.json` to the repo root alongside the other files.
 
 ---
 
+### STEP 4c — Local memory (opt-in)
+
+Claude Code's persistent **local memory** lives under `~/.claude/projects/<slug>/memory/`
+(each project has its own `memory/` folder with `MEMORY.md` plus individual fact files).
+This is **not** the per-project `CLAUDE.md` files (those live inside each project's own repo)
+— it's the machine-local memory Claude accumulates while you work.
+
+**Ask the user first** (memory can contain personal notes, so it is opt-in):
+```
+🧠 Include local memory in this backup?
+
+   This backs up ~/.claude/projects/*/memory/ (Claude's accumulated
+   local memory), not the CLAUDE.md files of each project.
+
+Include memory? (reply: yes / no)
+```
+
+**If the user replies no**, skip this step (do not collect any memory).
+
+**If the user replies yes**, run this `bash` to collect every non-empty `memory/` folder,
+preserving its project slug. Works on Linux, macOS and Windows (Git Bash):
+
+```bash
+SOURCE_PROJECTS="$HOME/.claude/projects"
+MEM_DEST="$TEMP_DIR/memory"
+mem_count=0
+if [ -d "$SOURCE_PROJECTS" ]; then
+  for pdir in "$SOURCE_PROJECTS"/*/; do
+    mdir="${pdir}memory"
+    if [ -d "$mdir" ] && [ -n "$(ls -A "$mdir" 2>/dev/null)" ]; then
+      slug=$(basename "$pdir")
+      mkdir -p "$MEM_DEST/$slug"
+      cp -r "$mdir/." "$MEM_DEST/$slug/"
+      mem_count=$((mem_count+1))
+    fi
+  done
+fi
+echo "Memory projects collected: $mem_count"
+```
+
+The collected `memory/<slug>/...` files will be uploaded together with the rest in STEP 6.
+
+> **Note on portability:** the `<slug>` is the project's absolute path with slashes replaced
+> by dashes (e.g. `/home/jorge/Escritorio/app` → `-home-jorge-Escritorio-app`). Memory
+> re-attaches on restore only when the same project sits at the **same absolute path** on the
+> destination machine (a different username or OS changes the slug). The backup/restore tooling
+> itself is fully cross-platform.
+
+---
+
 ### STEP 5 — Add metadata file
 
 Create a file called `backup-meta.json` in the temp directory. Fill the fields from these
@@ -185,6 +235,7 @@ Included:
   ✓ commands/ (<n> files)
   ✓ skills/ (<n> files)
   ✓ agents/ (<n> files)
+  ✓ memory/ (<n> project(s))   ← only if the user opted in; omit this line otherwise
 
 Excluded for security:
   ⊘ .credentials.json
