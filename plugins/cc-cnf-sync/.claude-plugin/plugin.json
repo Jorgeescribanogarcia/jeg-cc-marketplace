@@ -1,7 +1,7 @@
 {
   "name": "cc-cnf-sync",
   "version": "2.4.0",
-  "description": "Backup and restore Claude Code configuration to/from a private GitHub repository, fully portable across machines (Linux, macOS, Windows). Run /setup after installing.",
+  "description": "Backup and restore Claude Code configuration (incl. per-project memory, auto-reattached across machines/OS via a SessionStart hook) to/from a private GitHub repository, fully portable across Linux, macOS and Windows. Run /setup after installing.",
   "author": {
     "name": "Jorgeescribanogarcia",
     "url": "https://github.com/Jorgeescribanogarcia"

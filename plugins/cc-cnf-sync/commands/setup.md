@@ -60,15 +60,15 @@ reconnect on restart, so an in-session call would still use the old connection).
 
 **Exit code 2 — token missing or rejected by GitHub.** The script wrote a
 `githubToken.sh` helper to the current folder and printed its full path. Show the
-user a clear, friendly message in **Spanish**, including a clickable folder link
-built from that absolute path:
+user a clear, friendly message, including a clickable folder link built from that
+absolute path:
 ```
-⚠️ Necesitas un token de GitHub válido (con permiso 'repo') para continuar.
+⚠️ You need a valid GitHub token (with the 'repo' scope) to continue.
 
-1. Abre una terminal en la carpeta del asistente: [Abrir carpeta](file:///<ABSOLUTE_FOLDER_PATH>/)
-2. Ejecuta `bash githubToken.sh`, pega un token válido y pulsa Enter.
-   (Crea el token en https://github.com/settings/tokens con scope 'repo'.)
-3. Vuelve aquí y ejecuta /setup de nuevo.
+1. Open the helper folder: [Open folder](file:///<ABSOLUTE_FOLDER_PATH>/)
+2. Run `bash githubToken.sh`, paste a valid token, and press Enter.
+   (Create the token at https://github.com/settings/tokens with the 'repo' scope.)
+3. Come back here and run /setup again.
 ```
 Then **stop**.
 

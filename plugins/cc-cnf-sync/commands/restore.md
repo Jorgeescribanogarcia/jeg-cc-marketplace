@@ -103,8 +103,8 @@ Show:
 
 Use the GitHub MCP to list all files in the `claude-code-config` repository.
 
-For each file (excluding `backup-meta.json`, `plugins.json` — handled in STEP 7 — **and**
-anything under `memory/` — handled in STEP 6b):
+For each file (excluding `backup-meta.json`, `plugins.json`, `memory-manifest.json`, and
+anything under `memory/` — plugins are handled in STEP 7 and memory in STEP 7b):
 1. Download the file content using the GitHub MCP
 2. Determine the correct local path under `~/.claude/`
 3. Create any necessary subdirectories
@@ -123,51 +123,6 @@ Mapping:
 > portable `plugins.json` (STEP 7) rebuilds plugins correctly for *this* machine instead.
 
 Show progress as each file is restored.
-
----
-
-### STEP 6b — Restore local memory (opt-in)
-
-If the backup contains a `memory/` folder, offer to restore Claude Code's persistent
-**local memory** (the `~/.claude/projects/<slug>/memory/` folders — **not** the per-project
-`CLAUDE.md` files).
-
-If there is **no** `memory/` folder in the backup, skip this step silently.
-
-Otherwise **ask the user first**:
-```
-🧠 This backup includes local memory (<n> project(s)).
-
-⚠️  Restoring will OVERWRITE the memory of each matching project on this
-    machine (files present here but not in the backup are removed for those
-    projects). Projects not in the backup are left untouched.
-
-Import memory? (reply: yes / no)
-```
-
-**If the user replies no**, skip this step.
-
-**If the user replies yes**, restore each backed-up project's memory with **overwrite**
-semantics — for every `<slug>` present under `memory/` in the backup:
-
-1. Wipe the destination memory folder for that slug and recreate it empty:
-   ```bash
-   MDIR="$HOME/.claude/projects/<slug>/memory"
-   rm -rf "$MDIR"
-   mkdir -p "$MDIR"
-   ```
-2. Download each file under `memory/<slug>/` (via the GitHub MCP) and write it to
-   `~/.claude/projects/<slug>/memory/<file>`, creating any subdirectories.
-
-Only touch slugs that exist in the backup — never delete memory for projects that are not
-in the backup.
-
-> **Portability note:** the `<slug>` encodes the project's absolute path. Restored memory
-> only re-attaches when the same project lives at the same absolute path on this machine
-> (a different username or OS yields a different slug). This is inherent to how Claude Code
-> keys memory; the restore tooling itself works on Linux, macOS and Windows.
-
-Show progress as each memory file is restored.
 
 ---
 
@@ -198,14 +153,48 @@ reinstall plugins manually with `claude plugin install <name>@<marketplace>`.
 
 ---
 
+### STEP 7b — Restore per-project memory (same-machine)
+
+This step re-seats memory onto **this** machine's project slugs. Cross-machine / cross-OS attach is
+handled automatically by the `SessionStart` hook (see below) — you don't need to do anything for that.
+
+If the repo has a `memory-manifest.json`, use it to map each backed-up project's `safeKey` to its
+original `slug`, then restore the notes:
+
+1. Download `memory-manifest.json`. Its schema-2 entries look like
+   `{ "slug": "...", "safeKey": "...", "name": "...", "files": N }`.
+2. For each entry, list files under `memory/<safeKey>/` in the repo, download each, and write it to
+   `~/.claude/projects/<slug>/memory/<file>` (works on Linux, macOS and Windows via Git Bash):
+
+```bash
+# $slug/$safeKey come from a manifest entry; $file/$content come from memory/<safeKey>/<file>.
+dst="$HOME/.claude/projects/$slug/memory/$file"
+mkdir -p "$(dirname "$dst")"
+printf '%s' "$content" > "$dst"
+```
+
+If the manifest is **schema 1** (legacy: `memory/<slug>/...`, no `safeKey`), fall back to using the
+`slug` as the folder name. If no `memory-manifest.json` exists at all, skip this step silently.
+
+> **The hook is what makes memory portable across machines/OS.** Even if this same-machine step maps
+> nothing (e.g. you're restoring on a brand-new Linux box where the slugs differ), the plugin's
+> `SessionStart` hook re-attaches each project's memory by its git-remote key the moment you open it —
+> pulling from your `claude-code-config` backup automatically. It needs `git`, `curl`, and a valid
+> `GITHUB_PERSONAL_ACCESS_TOKEN` (the same one `/setup` configures) on that machine.
+>
+> This step overwrites memory only for projects present in the backup; others are left untouched, and
+> the STEP 5 safety backup preserves the old `.claude` for rollback.
+
+---
+
 ### STEP 8 — Final summary
 
 ```
 ✅ Restore completed
 
 📁 Files restored: <count>
-🧠 Memory restored: <n> project(s)   ← only if the user opted in; omit this line otherwise
 🔌 Plugins rebuilt: <n> plugin(s) from <m> marketplace(s)
+🧠 Memory restored: <k> note(s) across <n> project(s)
 📅 Backup applied: <backup_date>
 
 ⚠️  Restart Claude Code to apply all changes (plugins finish loading on restart).
