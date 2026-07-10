@@ -120,6 +120,19 @@ SRC="$CACHE/memory/$SAFE"
 # Key not in the current cache? Pull once in case the backup is newer, then retry.
 [ -d "$SRC" ] || refresh_cache
 
+# ── follow a rename alias ──────────────────────────────────────────
+# When a repo is renamed its normalized key changes, so a fresh clone computes a
+# new key with no folder yet. /backup leaves a sidecar `memory/<oldKey>.alias`
+# (one line: the current key) so the old key still resolves. Follow it, once,
+# for whichever of the current/old key is missing but has an alias pointing on.
+if [ ! -d "$SRC" ] && [ -f "$CACHE/memory/$SAFE.alias" ]; then
+  TARGET=$(head -n1 "$CACHE/memory/$SAFE.alias" 2>/dev/null | tr -d ' \t\r\n')
+  case "$TARGET" in
+    ''|*/*|.*) : ;;                       # empty / path-y / hidden → ignore, stay safe
+    *) [ -d "$CACHE/memory/$TARGET" ] && { SRC="$CACHE/memory/$TARGET"; KEY="$TARGET"; } ;;
+  esac
+fi
+
 if [ ! -d "$SRC" ]; then
   : > "$MARKER"          # no backup for this project — remember, recheck in 24h
   exit 0
