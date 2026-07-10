@@ -50,7 +50,11 @@ if [ -f "$MARKER" ] && [ -z "$(find "$MARKER" -mmin +1440 2>/dev/null)" ]; then
   exit 0
 fi
 
-command -v git >/dev/null 2>&1 || exit 0
+if ! command -v git >/dev/null 2>&1; then
+  : > "$MARKER"
+  emit_context "cc-cnf-sync: git is not installed on this machine, so this project's saved memory could not be attached. Install git (and curl) to enable cross-machine memory."
+  exit 0
+fi
 
 # ── stable key from git remote (fallback: folder name) ─────────────
 # MUST stay identical to norm_key() in commands/backup.md.
@@ -114,7 +118,15 @@ refresh_cache() {
       pull --ff-only >/dev/null 2>&1
 }
 
-ensure_cache || { : > "$MARKER"; exit 0; }
+if ! ensure_cache; then
+  : > "$MARKER"
+  if [ -z "$TOKEN" ]; then
+    emit_context "cc-cnf-sync: this project may have saved memory in your backup, but GITHUB_PERSONAL_ACCESS_TOKEN is not set so it could not be fetched. Run /setup to configure the token, then reopen this project."
+  else
+    emit_context "cc-cnf-sync: could not reach your config backup on GitHub (network, curl, or token permissions). Memory was not attached. Check /status; it will retry on the next session."
+  fi
+  exit 0
+fi
 
 SRC="$CACHE/memory/$SAFE"
 # Key not in the current cache? Pull once in case the backup is newer, then retry.
@@ -135,6 +147,7 @@ fi
 
 if [ ! -d "$SRC" ]; then
   : > "$MARKER"          # no backup for this project — remember, recheck in 24h
+  emit_context "cc-cnf-sync: no saved memory found in your backup for this project (key: ${KEY}). If it should have some, run /backup on the machine that has it; otherwise this is expected for a project you have not backed up."
   exit 0
 fi
 
