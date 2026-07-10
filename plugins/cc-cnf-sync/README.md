@@ -4,7 +4,7 @@ Backup and restore your Claude Code configuration (settings, plugins, commands, 
 
 Backups are **portable across machines**: instead of copying machine-specific plugin paths, `/backup` writes a small `plugins.json` manifest (which plugins, from which marketplaces), and `/restore` rebuilds them with the Claude Code CLI — so the same setup works under any username or OS.
 
-**Per-project memory** (`~/.claude/projects/<project>/memory/*.md`) is also included, and it follows the project **across machines and operating systems**. Notes are keyed by a stable identity (the normalized **git remote URL**, falling back to the folder name) instead of the machine-specific path slug. A `SessionStart` hook then re-attaches each project's memory automatically the first time you open it on a new machine — pulling from your backup by that key — so the same project rehydrates its notes whether it lives at `D:\...\proj` on Windows or `/home/you/proj` on Linux.
+**Per-project memory** (`~/.claude/projects/<project>/memory/*.md`) is kept in **continuous two-way sync across machines and operating systems**. Notes are keyed by a stable identity (the normalized **git remote URL**, falling back to the folder name) instead of the machine-specific path slug. `SessionStart` and `SessionEnd` hooks pull the latest from your backup, merge it with your local notes, and push your changes back — so every machine converges to the same set of notes whether the project lives at `D:\...\proj` on Windows or `/home/you/proj` on Linux. The merge is **conflict-safe**: if the same note diverged on two machines, both versions are kept (the second as `<name>.conflict.md`) and nothing is ever lost — git history in the backup is the safety net.
 
 Conversation transcripts (sessions) are intentionally **not** backed up — they're large and may contain sensitive pasted content.
 
@@ -24,16 +24,23 @@ every OS — no PowerShell required.
 ### How cross-machine memory works
 
 ```
-Machine A  /backup ─► GitHub (claude-code-config): memory/<key>/*.md + memory-manifest.json
-Machine B  open project ─► SessionStart hook: computes the project's git-remote key,
-                           clones the backup once, copies matching memory into the local
-                           project — no manual step beyond having a token configured.
+On every SessionStart/SessionEnd, for the project you have open:
+  1. compute the project's git-remote key
+  2. fetch the backup, reset to remote truth, file-level union-merge with local notes
+  3. commit + push (retried if another machine pushed first)
+  4. copy the merged result back into the local project
+Result: open the project anywhere → its notes are there and up to date, both directions.
 ```
 
-Requirements for the auto-attach hook on the target machine: `git`, `curl`, and a valid
-`GITHUB_PERSONAL_ACCESS_TOKEN` (the same one `/setup` configures). The hook is **fail-open** — if
-anything is missing it does nothing and never blocks your session. On Windows it runs under Git Bash
-(bundled with git); projects without a git remote fall back to a folder-name key.
+Merge rules (all lossless): a note that exists on only one side is copied to the other; a note that
+diverged on two machines keeps **both** copies (`<name>.md` + `<name>.conflict.md`); `MEMORY.md` (the
+index) is line-unioned. Deleting a note does **not** propagate in this version — it reappears from the
+other machine — so a delete is never silently mirrored everywhere.
+
+Requirements on each machine: `git`, `curl`, and a valid `GITHUB_PERSONAL_ACCESS_TOKEN` (the same one
+`/setup` configures). The hook is **fail-open** — if anything is missing or a push can't complete, your
+local notes are left untouched, it tells you why, and it retries next session. On Windows it runs under
+Git Bash (bundled with git); projects without a git remote fall back to a folder-name key.
 
 ## Commands
 
