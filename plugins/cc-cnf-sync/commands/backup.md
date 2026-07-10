@@ -155,6 +155,11 @@ The `SessionStart` hook (`hooks/attach-memory.sh`) recomputes this same key on t
 re-attaches the memory automatically. Run this `bash` (works on Linux, macOS and Windows via Git Bash);
 the key rules **must stay identical** to `norm_key()` in `hooks/attach-memory.sh`:
 
+> **Before running the script**, download the repo's current `memory-manifest.json` (via the
+> GitHub MCP) to `$TEMP_DIR/prev-manifest.json` if it exists. It lets this backup detect when a
+> project's key changed (e.g. the repo was renamed) and leave a rename alias so old clones keep
+> resolving. If the repo has no manifest yet, skip the download — the script handles its absence.
+
 ```bash
 SOURCE_PROJECTS="$HOME/.claude/projects"
 MEM_DEST="$TEMP_DIR/memory"
@@ -200,6 +205,19 @@ if [ -d "$SOURCE_PROJECTS" ]; then
     mkdir -p "$MEM_DEST/$safe"
     cp -r "$mdir/." "$MEM_DEST/$safe/"
 
+    # Rename-robustness: if a previous backup keyed THIS project (matched by slug — stable on
+    # the same machine) under a DIFFERENT safeKey, the repo was likely renamed. Drop a sidecar
+    # `memory/<oldSafeKey>.alias` (one line = the current safeKey) so a clone that still computes
+    # the old key keeps resolving to the up-to-date notes. Read by norm_key()'s companion logic
+    # in hooks/attach-memory.sh.
+    if [ -f "$TEMP_DIR/prev-manifest.json" ]; then
+      prevsafe=$(grep -F "\"slug\": \"$slug\"" "$TEMP_DIR/prev-manifest.json" 2>/dev/null \
+                 | sed -n 's/.*"safeKey"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+      if [ -n "$prevsafe" ] && [ "$prevsafe" != "$safe" ]; then
+        printf '%s\n' "$safe" > "$MEM_DEST/$prevsafe.alias"
+      fi
+    fi
+
     [ -n "$entries" ] && entries="$entries,"
     entries="$entries
     { \"slug\": \"$slug\", \"key\": \"$key\", \"safeKey\": \"$safe\", \"name\": \"$name\", \"files\": $fcount }"
@@ -228,11 +246,19 @@ This writes each project's notes to `memory/<safeKey>/...` in the temp dir plus 
 }
 ```
 
-Upload the `memory/` tree and `memory-manifest.json` to the repo alongside the other files.
+Upload the `memory/` tree (including any `<oldSafeKey>.alias` sidecars) and `memory-manifest.json`
+to the repo alongside the other files. The upload is **additive** — do NOT delete `memory/` folders
+that exist in the repo but not in this backup: they belong to other machines' projects or to a
+project's previous name, and pruning them would break those clones.
 
 > **Portability:** because memory is keyed by the git remote (not the path), the `SessionStart` hook
 > can re-attach it on any machine/OS where the same repo is checked out — regardless of where it lives
 > on disk. Projects with no git remote fall back to a folder-name key (works if the folder name matches).
+>
+> **Repo renames:** renaming a repo changes its normalized key, so a fresh clone would compute a new
+> key with no folder. To survive that, a backup that detects a project's key changed (same slug, new
+> safeKey) writes a `memory/<oldSafeKey>.alias` sidecar pointing at the current key; the hook follows
+> it, so clones on either the old or new remote keep resolving to the same, up-to-date notes.
 
 ---
 
