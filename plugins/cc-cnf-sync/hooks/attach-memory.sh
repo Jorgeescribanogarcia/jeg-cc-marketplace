@@ -87,7 +87,15 @@ resolve_repo() { # sets URL + HDR from the token; returns 1 if unavailable
            | sed -n 's/.*"login"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
   [ -n "$LOGIN" ] || return 1
   URL="https://github.com/$LOGIN/claude-code-config.git"
-  HDR="Authorization: Bearer $TOKEN"   # passed via -c, never written to disk
+  # GitHub's git-over-HTTPS rejects "Authorization: Bearer <token>" (git then falls
+  # back to prompting for a username and the clone/pull fails non-interactively).
+  # Use HTTP Basic with the PAT as the password instead — accepted by GitHub and,
+  # because it's passed via -c http.extraHeader (never the remote URL), the token is
+  # still not written to the cache's .git/config on disk. base64 ships on Linux,
+  # macOS and Git Bash for Windows.
+  B64=$(printf '%s' "x-access-token:$TOKEN" | base64 2>/dev/null | tr -d '\n')
+  [ -n "$B64" ] || return 1
+  HDR="Authorization: Basic $B64"
   return 0
 }
 
