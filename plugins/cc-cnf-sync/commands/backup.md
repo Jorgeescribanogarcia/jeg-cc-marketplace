@@ -151,9 +151,10 @@ Persistent memory is **per project**: it lives at `~/.claude/projects/<slug>/mem
 follow the project to another machine. Instead we key each project's memory by a **stable identity**:
 the normalized **git remote URL** (identical on every clone/OS), falling back to the folder name.
 
-The `SessionStart` hook (`hooks/attach-memory.sh`) recomputes this same key on the target machine and
-re-attaches the memory automatically. Run this `bash` (works on Linux, macOS and Windows via Git Bash);
-the key rules **must stay identical** to `norm_key()` in `hooks/attach-memory.sh`:
+The `SessionStart`/`SessionEnd` hook (`hooks/sync-memory.sh`) recomputes this same key on every machine
+and **bidirectionally syncs** the memory (pull + merge + push) automatically, so this `/backup` is just a
+full manual snapshot on top of the same layout. Run this `bash` (works on Linux, macOS and Windows via
+Git Bash); the key rules **must stay identical** to `norm_key()` in `hooks/sync-memory.sh`:
 
 > **Before running the script**, download the repo's current `memory-manifest.json` (via the
 > GitHub MCP) to `$TEMP_DIR/prev-manifest.json` if it exists. It lets this backup detect when a
@@ -165,7 +166,7 @@ SOURCE_PROJECTS="$HOME/.claude/projects"
 MEM_DEST="$TEMP_DIR/memory"
 
 # Normalize a git remote (or folder name) into an OS-independent key.
-# MUST stay identical to norm_key() in hooks/attach-memory.sh.
+# MUST stay identical to norm_key() in hooks/sync-memory.sh.
 norm_key() {
   k=$1
   case "$k" in *.git) k=${k%.git} ;; esac
@@ -209,7 +210,7 @@ if [ -d "$SOURCE_PROJECTS" ]; then
     # the same machine) under a DIFFERENT safeKey, the repo was likely renamed. Drop a sidecar
     # `memory/<oldSafeKey>.alias` (one line = the current safeKey) so a clone that still computes
     # the old key keeps resolving to the up-to-date notes. Read by norm_key()'s companion logic
-    # in hooks/attach-memory.sh.
+    # in hooks/sync-memory.sh.
     if [ -f "$TEMP_DIR/prev-manifest.json" ]; then
       prevsafe=$(grep -F "\"slug\": \"$slug\"" "$TEMP_DIR/prev-manifest.json" 2>/dev/null \
                  | sed -n 's/.*"safeKey"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
