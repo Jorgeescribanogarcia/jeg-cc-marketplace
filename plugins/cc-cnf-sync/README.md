@@ -33,14 +33,23 @@ Result: open the project anywhere → its notes are there and up to date, both d
 ```
 
 Merge rules (all lossless): a note that exists on only one side is copied to the other; a note that
-diverged on two machines keeps **both** copies (`<name>.md` + `<name>.conflict.md`); `MEMORY.md` (the
-index) is line-unioned. Deleting a note does **not** propagate in this version — it reappears from the
-other machine — so a delete is never silently mirrored everywhere.
+diverged on two machines keeps **both** copies (`<name>.md` + `<name>.conflict.md`, compared ignoring
+CRLF/LF so line-endings alone never cause a false conflict); `MEMORY.md` (the index) is line-unioned.
 
-Requirements on each machine: `git`, `curl`, and a valid `GITHUB_PERSONAL_ACCESS_TOKEN` (the same one
-`/setup` configures). The hook is **fail-open** — if anything is missing or a push can't complete, your
-local notes are left untouched, it tells you why, and it retries next session. On Windows it runs under
-Git Bash (bundled with git); projects without a git remote fall back to a folder-name key.
+Deletions are treated by kind. Deleting a **real note** does **not** propagate — it reappears from the
+other machine — so a delete is never silently mirrored everywhere. But a **`.conflict.md`** is an
+ephemeral marker, not a note: once you reconcile it into `<name>.md` and delete it, that removal **does**
+propagate — the sync drops a tiny `<name>.conflict.md.deleted` tombstone in the backup so every machine
+clears its copy and it never resurrects. That's what keeps conflict files from piling up over time.
+
+Requirements on each machine: `git`, plus a git credential for `github.com` that the OS credential
+helper already holds — git-credential-manager on Windows, `osxkeychain` on macOS, libsecret/store on
+Linux, or `gh auth login`. **The hook needs no personal access token**: it pushes with git's normal
+credentials (the same ones that let you `git push` your repos), so nothing expires out from under it in
+an env var. It runs headless with `GIT_TERMINAL_PROMPT=0`, so a missing credential fails fast instead of
+hanging. The hook is **fail-open** — if anything is missing or a push can't complete, your local notes
+are left untouched, it tells you why, and it retries next session. On Windows it runs under Git Bash
+(bundled with git); projects without a git remote fall back to a folder-name key.
 
 ## Commands
 
@@ -57,7 +66,7 @@ Git Bash (bundled with git); projects without a git remote fall back to a folder
 - Claude Code v22+
 - Git Bash on Windows (Claude Code already requires it) — no extra setup on Linux/macOS
 - A GitHub personal access token with `repo` scope (the `/setup` command will guide you)
-- For the cross-machine memory hook: `git` and `curl` on `PATH` (on Windows, Git Bash — bundled with Git — provides both). If missing, the hook simply does nothing; the rest of the plugin still works.
+- For the cross-machine memory hook: `git` on `PATH` (on Windows, Git Bash — bundled with Git) **and a working git credential for github.com** (its credential manager, or `gh auth login`). No PAT is needed for the hook — it uses git's own credentials. If either is missing, the hook simply does nothing; the rest of the plugin still works.
 
 ## How setup works
 

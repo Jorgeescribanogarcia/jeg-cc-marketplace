@@ -100,6 +100,12 @@ mkdir -p "$TOKEN_DIR"
 printf '%s' "$TOKEN" > "$TOKEN_FILE"
 chmod 600 "$TOKEN_FILE" 2>/dev/null || true
 
+# Record the backup repo URL for the memory-sync hook. The hook authenticates via
+# the OS git credential helper (NOT this token), so it only needs to know *which*
+# repo to push to — this file is its authoritative source (it falls back to the
+# project's origin owner if absent).
+printf '%s' "https://github.com/$LOGIN/claude-code-config.git" > "$TOKEN_DIR/repo"
+
 # Clean any previous (possibly stale) github MCP, then add fresh.
 if claude mcp list 2>&1 | grep -qi "github"; then
     claude mcp remove github --scope user >/dev/null 2>&1 || true

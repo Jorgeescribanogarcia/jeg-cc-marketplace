@@ -179,8 +179,9 @@ If the manifest is **schema 1** (legacy: `memory/<slug>/...`, no `safeKey`), fal
 > **The hook is what makes memory portable across machines/OS.** Even if this same-machine step maps
 > nothing (e.g. you're restoring on a brand-new Linux box where the slugs differ), the plugin's
 > `SessionStart` hook re-attaches each project's memory by its git-remote key the moment you open it —
-> pulling from your `claude-code-config` backup automatically. It needs `git`, `curl`, and a valid
-> `GITHUB_PERSONAL_ACCESS_TOKEN` (the same one `/setup` configures) on that machine.
+> pulling from your `claude-code-config` backup automatically. It needs `git` on that machine and a git
+> credential for `github.com` (the OS credential manager, or `gh auth login`) — **no personal access
+> token**; the hook authenticates the same way `git push` does.
 >
 > This step overwrites memory only for projects present in the backup; others are left untouched, and
 > the STEP 5 safety backup preserves the old `.claude` for rollback.
