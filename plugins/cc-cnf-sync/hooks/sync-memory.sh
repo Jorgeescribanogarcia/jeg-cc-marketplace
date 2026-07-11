@@ -33,10 +33,25 @@ emit_context() { # $1 = message -> inject into the session as context
 
 # ── read stdin JSON ────────────────────────────────────────────────
 INPUT=$(cat 2>/dev/null)
+[ -n "$INPUT" ] || INPUT=${CC_SYNC_INPUT:-}   # background re-invocation (below) passes it via env
 [ -n "$INPUT" ] || exit 0
 
 json_str() { printf '%s' "$INPUT" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" | head -n1; }
 path_conv() { printf '%s' "$1" | sed 's#\\\\#\\#g; s#\\/#/#g' | tr '\\' '/'; }
+
+# On SessionEnd the app tears the session down and cancels the still-running hook (the git
+# push takes a few seconds) — that surfaces as "Hook cancelled". Detach the sync so the hook
+# returns instantly: the background copy finishes the push, and SessionStart re-syncs anyway,
+# so nothing is ever lost either way. SessionStart itself stays synchronous (it must emit
+# context before the session uses memory).
+if [ "$(json_str hook_event_name)" = "SessionEnd" ] && [ -z "$CC_SYNC_BG" ]; then
+  if command -v nohup >/dev/null 2>&1; then
+    CC_SYNC_BG=1 CC_SYNC_INPUT="$INPUT" nohup sh "$0" </dev/null >/dev/null 2>&1 &
+  else
+    CC_SYNC_BG=1 CC_SYNC_INPUT="$INPUT" sh "$0" </dev/null >/dev/null 2>&1 &
+  fi
+  exit 0
+fi
 
 TRANSCRIPT=$(path_conv "$(json_str transcript_path)")
 CWD=$(path_conv "$(json_str cwd)")
