@@ -62,7 +62,9 @@ credentials (the same ones that let you `git push` your repos), so nothing expir
 an env var. It runs headless with `GIT_TERMINAL_PROMPT=0`, so a missing credential fails fast instead of
 hanging. The hook is **fail-open** — if anything is missing or a push can't complete, your local notes
 are left untouched, it tells you why, and it retries next session. On Windows it runs under Git Bash
-(bundled with git); projects without a git remote fall back to a folder-name key.
+(bundled with git); projects without a git remote fall back to a folder-name key. The `SessionEnd` sync
+runs **detached** so closing Claude Code never cancels a mid-flight push (and `SessionStart` re-syncs
+regardless, so nothing is lost either way).
 
 ## Commands
 
