@@ -15,7 +15,9 @@
 # Union merge rules:
 #   - note only on one side          -> copied to the other
 #   - same note, identical           -> nothing
-#   - same note, diverged            -> local kept as <name>.md, remote kept as
+#   - same note, only one side edited -> that edit wins, no conflict (3-way vs the
+#                                       last-synced base — editing a note is not a conflict)
+#   - same note, both sides edited    -> local kept as <name>.md, remote kept as
 #                                       <name>.conflict.md (on BOTH sides)
 #   - MEMORY.md                      -> line-union (dedup) — the right index semantic
 #   - real-note deletions            -> NOT propagated (a note deleted on one machine
@@ -144,12 +146,29 @@ state_has() { [ -f "$STATE" ] && grep -qxF "$1" "$STATE" 2>/dev/null; }
 state_add() { state_has "$1" || printf '%s\n' "$1" >> "$STATE" 2>/dev/null; }
 state_del() { [ -f "$STATE" ] || return 0; grep -vxF "$1" "$STATE" 2>/dev/null > "$STATE.tmp"; mv "$STATE.tmp" "$STATE" 2>/dev/null; }
 
+# 3-way merge support. hash_note() is the CRLF-normalized content hash (via git, always
+# present). base_get() returns the hash of a note as this machine last SYNCED it — the
+# common ancestor — so union_merge can tell "only I edited this note" (take the edit, no
+# conflict) from "both sides changed since we last agreed" (a real conflict). The base is
+# per-machine (never synced) and refreshed only after a successful sync (record_bases).
+hash_note() { tr -d '\r' < "$1" 2>/dev/null | git hash-object --stdin 2>/dev/null; }
+base_get()  { [ -f "$BASEFILE" ] && awk -v n="$1" '$2==n{print $1; exit}' "$BASEFILE" 2>/dev/null; }
+record_bases() { # $1 = local memory dir — snapshot every note's hash as the new base
+  bf="$1/.cc-cnf-sync-base"
+  { for f in "$1"/*.md; do [ -e "$f" ] || continue
+      b=$(basename "$f"); case "$b" in *.conflict.md) continue ;; esac
+      printf '%s %s\n' "$(hash_note "$f")" "$b"
+    done; } > "$bf.tmp" 2>/dev/null
+  mv "$bf.tmp" "$bf" 2>/dev/null
+}
+
 # ── file-level union merge of $1 (remote/cache dir) and $2 (local dir) ─
 # Ends with BOTH dirs holding the union; conflicts keep both copies.
 union_merge() {
   cdir=$1; ldir=$2
   mkdir -p "$cdir" "$ldir" 2>/dev/null
   STATE="$ldir/.cc-cnf-sync-conflicts"
+  BASEFILE="$ldir/.cc-cnf-sync-base"
   # Deliberate real-note deletions (from the /memory command) propagate via a
   # <note>.md.deleted tombstone. Apply them FIRST so the loops below can't resurrect the
   # note. Accidental `rm` of a real note does NOT create a tombstone (only /memory does),
@@ -170,12 +189,20 @@ union_merge() {
     if [ ! -e "$lf" ]; then
       cp "$rf" "$lf" 2>/dev/null
     elif notes_differ "$rf" "$lf"; then
-      cf="${base%.md}.conflict.md"
-      rm -f "$cdir/$cf.deleted" 2>/dev/null                  # a fresh divergence overrides a stale tombstone
-      cp "$rf" "$ldir/$cf" 2>/dev/null                       # keep remote copy locally
-      cp "$rf" "$cdir/$cf" 2>/dev/null                       # and propagate the marker
-      cp "$lf" "$cdir/$base" 2>/dev/null                     # local wins as canonical
-      state_add "$cf"
+      # 3-way merge against the last-synced base, so editing a note doesn't self-conflict.
+      bh=$(base_get "$base"); lh=$(hash_note "$lf"); rh=$(hash_note "$rf")
+      if [ -n "$bh" ] && [ "$rh" = "$bh" ] && [ "$lh" != "$bh" ]; then
+        cp "$lf" "$cdir/$base" 2>/dev/null                   # only THIS machine edited → local wins, no conflict
+      elif [ -n "$bh" ] && [ "$lh" = "$bh" ] && [ "$rh" != "$bh" ]; then
+        cp "$rf" "$lf" 2>/dev/null                           # only the backup changed → pull it, no conflict
+      else
+        cf="${base%.md}.conflict.md"                         # both sides changed since the base (or no base) → real conflict
+        rm -f "$cdir/$cf.deleted" 2>/dev/null                # a fresh divergence overrides a stale tombstone
+        cp "$rf" "$ldir/$cf" 2>/dev/null                     # keep remote copy locally
+        cp "$rf" "$cdir/$cf" 2>/dev/null                     # and propagate the marker
+        cp "$lf" "$cdir/$base" 2>/dev/null                   # local wins as canonical
+        state_add "$cf"
+      fi
     fi
   done
   # local -> remote (files the cache does not have yet)
@@ -233,6 +260,57 @@ union_merge() {
   done
 }
 
+# ── global user config sync (in addition to per-project memory) ────────
+# Continuously syncs the user-level config the same conflict-safe, 3-way way as memory,
+# so editing your global CLAUDE.md / commands / skills / agents on one machine reaches the
+# others automatically. STRICT ALLOWLIST — nothing else is ever touched. Anything
+# machine-specific belongs in settings.local.json, which is intentionally NOT in the list.
+CFGHOME="${CC_SYNC_CONFIG_HOME:-$HOME/.claude}"     # test seam for offline end-to-end tests
+CFG_BASE="$CFG_DIR/config-base"                     # machine-level 3-way base (relpath -> hash)
+CONFIG_FILES="CLAUDE.md settings.json keybindings.json plugins.json"
+CONFIG_TREES="commands skills agents"
+
+cfgbase_get() { [ -f "$CFG_BASE" ] || return; awk -v n="$1" '{p=$0;sub(/^[^ ]* /,"",p); if(p==n){print $1;exit}}' "$CFG_BASE" 2>/dev/null; }
+
+# 3-way merge one config file: rel=identity (for the base), lf=local path, cf=cache path.
+# Deletions are NOT propagated (a file only on one side is copied to the other — safety).
+# A true two-sided change keeps local canonical and saves the remote as a .cc-conflict sidecar.
+merge_one() {
+  rel=$1; lf=$2; cf=$3
+  if [ ! -e "$lf" ] && [ ! -e "$cf" ]; then return; fi
+  if [ ! -e "$lf" ]; then mkdir -p "$(dirname "$lf")" 2>/dev/null; cp "$cf" "$lf" 2>/dev/null; return; fi
+  if [ ! -e "$cf" ]; then mkdir -p "$(dirname "$cf")" 2>/dev/null; cp "$lf" "$cf" 2>/dev/null; return; fi
+  notes_differ "$cf" "$lf" || return
+  bh=$(cfgbase_get "$rel"); lh=$(hash_note "$lf"); rh=$(hash_note "$cf")
+  if [ -n "$bh" ] && [ "$rh" = "$bh" ] && [ "$lh" != "$bh" ]; then cp "$lf" "$cf" 2>/dev/null            # only local edited
+  elif [ -n "$bh" ] && [ "$lh" = "$bh" ] && [ "$rh" != "$bh" ]; then cp "$cf" "$lf" 2>/dev/null          # only backup edited
+  else cp "$cf" "$lf.cc-conflict" 2>/dev/null; cp "$cf" "$cf.cc-conflict" 2>/dev/null; cp "$lf" "$cf" 2>/dev/null; fi
+}
+
+sync_tree() { # $1=local root  $2=cache root  $3=rel prefix — per-file 3-way over a directory
+  lr=$1; cr=$2; pfx=$3
+  { [ -d "$lr" ] && ( cd "$lr" && find . -type f ! -name '*.cc-conflict' 2>/dev/null | sed 's#^\./##' )
+    [ -d "$cr" ] && ( cd "$cr" && find . -type f ! -name '*.cc-conflict' 2>/dev/null | sed 's#^\./##' ); } \
+  | sort -u | while IFS= read -r rp; do
+      [ -n "$rp" ] || continue
+      merge_one "$pfx/$rp" "$lr/$rp" "$cr/$rp"
+    done
+}
+
+sync_config() {
+  for f in $CONFIG_FILES; do merge_one "$f" "$CFGHOME/$f" "$CACHE/$f"; done
+  for d in $CONFIG_TREES; do sync_tree "$CFGHOME/$d" "$CACHE/$d" "$d"; done
+}
+
+record_config_bases() {  # snapshot the just-synced config hashes as the new 3-way base
+  mkdir -p "$CFG_DIR" 2>/dev/null
+  { for f in $CONFIG_FILES; do [ -f "$CFGHOME/$f" ] && printf '%s %s\n' "$(hash_note "$CFGHOME/$f")" "$f"; done
+    for d in $CONFIG_TREES; do [ -d "$CFGHOME/$d" ] && ( cd "$CFGHOME" && find "$d" -type f ! -name '*.cc-conflict' 2>/dev/null ) | while IFS= read -r rp; do
+        printf '%s %s\n' "$(hash_note "$CFGHOME/$rp")" "$rp"; done; done
+  } > "$CFG_BASE.tmp" 2>/dev/null
+  mv "$CFG_BASE.tmp" "$CFG_BASE" 2>/dev/null
+}
+
 # ── sync loop (retry on push race) ─────────────────────────────────
 had_local=0
 find "$MEM_DIR" -maxdepth 1 -type f -name '*.md' 2>/dev/null | grep -q . && had_local=1
@@ -245,13 +323,14 @@ while [ "$i" -le 3 ]; do
   CDIR="$CACHE/memory/$EFF"
 
   union_merge "$CDIR" "$MEM_DIR"
+  sync_config                             # global user config (CLAUDE.md, commands/skills/agents, …)
 
-  git -C "$CACHE" add -A "memory/$EFF" >/dev/null 2>&1
+  git -C "$CACHE" add -A >/dev/null 2>&1   # stage this project's memory AND any global config changes
   if git -C "$CACHE" diff --cached --quiet 2>/dev/null; then
     synced=1; break                       # nothing to push; local already updated from remote
   fi
   git -C "$CACHE" -c user.name="cc-cnf-sync" -c user.email="cc-cnf-sync@$MACHINE" \
-      commit -q -m "memory-sync: $EFF from $MACHINE @ $STAMP" >/dev/null 2>&1
+      commit -q -m "cc-cnf-sync: $EFF memory + user config from $MACHINE @ $STAMP" >/dev/null 2>&1
   if git_auth -C "$CACHE" push --quiet origin "$BR" >/dev/null 2>&1; then
     synced=1; break
   fi
@@ -261,6 +340,8 @@ done
 : > "$MARKER"
 
 if [ "$synced" = 1 ]; then
+  record_bases "$MEM_DIR"                 # snapshot the just-synced content as the 3-way base
+  record_config_bases                     # …and the global-config base
   N=$(find "$MEM_DIR" -maxdepth 1 -type f -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
   C=$(find "$MEM_DIR" -maxdepth 1 -type f -name '*.conflict.md' 2>/dev/null | wc -l | tr -d ' ')
   if [ "$had_local" = 0 ] && [ "$N" -gt 0 ]; then
