@@ -61,5 +61,5 @@ DAYS SINCE LAST BACKUP: <days or "N/A">
 If more than 7 days have passed since the last backup, show:
 ```
 ⚠️  It has been more than 7 days since your last backup.
-    Run /backup to update it.
+    Run /export to update it.
 ```
