@@ -91,3 +91,7 @@ Check that the Claude Code CLI is on PATH and try /setup again.
   re-validates and reinstalls the MCP with the current token.
 - Cross-platform: on Windows the same script runs under Git Bash, and `~` maps to
   `C:\Users\<you>`, so no OS-specific paths are needed.
+- The token configured here is for the **GitHub MCP** (`/backup`, `/restore`, `/status`). The
+  **memory-sync hook does not use it** — it authenticates through the machine's git credential helper
+  (git-credential-manager / `osxkeychain` / libsecret / `gh`). Setup also records the backup repo URL to
+  `~/.config/cc-cnf-sync/repo` so the hook knows where to push without needing a token or an API call.
