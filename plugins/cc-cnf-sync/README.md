@@ -2,7 +2,7 @@
 
 Backup and restore your Claude Code configuration (settings, plugins, commands, skills, agents, and per-project memory) to a private GitHub repository.
 
-Backups are **portable across machines**: instead of copying machine-specific plugin paths, `/backup` writes a small `plugins.json` manifest (which plugins, from which marketplaces), and `/restore` rebuilds them with the Claude Code CLI — so the same setup works under any username or OS.
+Backups are **portable across machines**: instead of copying machine-specific plugin paths, `/export` writes a small `plugins.json` manifest (which plugins, from which marketplaces), and `/import` rebuilds them with the Claude Code CLI — so the same setup works under any username or OS.
 
 **Per-project memory** (`~/.claude/projects/<project>/memory/*.md`) is kept in **continuous two-way sync across machines and operating systems**. Notes are keyed by a stable identity (the normalized **git remote URL**, falling back to the folder name) instead of the machine-specific path slug. `SessionStart` and `SessionEnd` hooks pull the latest from your backup, merge it with your local notes, and push your changes back — so every machine converges to the same set of notes whether the project lives at `D:\...\proj` on Windows or `/home/you/proj` on Linux. The merge is **conflict-safe**: if the same note diverged on two machines, both versions are kept (the second as `<name>.conflict.md`) and nothing is ever lost — git history in the backup is the safety net.
 
@@ -36,11 +36,13 @@ Merge rules (all lossless): a note that exists on only one side is copied to the
 diverged on two machines keeps **both** copies (`<name>.md` + `<name>.conflict.md`, compared ignoring
 CRLF/LF so line-endings alone never cause a false conflict); `MEMORY.md` (the index) is line-unioned.
 
-Deletions are treated by kind. Deleting a **real note** does **not** propagate — it reappears from the
-other machine — so a delete is never silently mirrored everywhere. But a **`.conflict.md`** is an
-ephemeral marker, not a note: once you reconcile it into `<name>.md` and delete it, that removal **does**
-propagate — the sync drops a tiny `<name>.conflict.md.deleted` tombstone in the backup so every machine
-clears its copy and it never resurrects. That's what keeps conflict files from piling up over time.
+Deletions are treated by kind. A plain `rm` of a **real note** does **not** propagate — it reappears from
+the other machine — so an accidental delete is never silently mirrored everywhere. To remove a real note
+**on purpose** (from the backup and every machine), use **`/memory delete <note>`**: it drops a
+`<name>.md.deleted` tombstone the hook honors everywhere. A **`.conflict.md`** is an ephemeral marker, not
+a note: once you reconcile it into `<name>.md` and delete it, that removal **also** propagates via a
+`<name>.conflict.md.deleted` tombstone, so conflict files never pile up. (To bring a deleted note back,
+remove its tombstone from `memory/<safeKey>/` in the backup.)
 
 Requirements on each machine: `git`, plus a git credential for `github.com` that the OS credential
 helper already holds — git-credential-manager on Windows, `osxkeychain` on macOS, libsecret/store on
@@ -56,9 +58,10 @@ are left untouched, it tells you why, and it retries next session. On Windows it
 | Command | Description |
 |---|---|
 | `/setup` | First-time setup — configures GitHub token and MCP automatically |
-| `/backup` | Upload your configuration to GitHub |
-| `/restore` | Restore your configuration from GitHub |
+| `/export` | Upload your configuration to GitHub |
+| `/import` | Restore your configuration from GitHub |
 | `/status` | Show status and last backup date |
+| `/memory` | View and manage synced memory — list / view / delete notes without opening GitHub |
 | `/uninstall` | Remove the plugin, saved token and (optionally) the GitHub MCP |
 
 ## Requirements

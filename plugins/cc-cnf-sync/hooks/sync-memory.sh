@@ -18,8 +18,10 @@
 #   - same note, diverged            -> local kept as <name>.md, remote kept as
 #                                       <name>.conflict.md (on BOTH sides)
 #   - MEMORY.md                      -> line-union (dedup) — the right index semantic
-#   - deletions                      -> NOT propagated in this version (a note deleted
-#                                       on one machine reappears from the other)
+#   - real-note deletions            -> NOT propagated (a note deleted on one machine
+#                                       reappears from the other — safety)
+#   - .conflict.md deletions         -> propagated via a <name>.conflict.md.deleted
+#                                       tombstone, so resolved conflicts don't pile up
 
 set +e
 
@@ -44,7 +46,7 @@ MARKER="$PROJ_DIR/.cc-cnf-sync-checked"
 
 command -v git >/dev/null 2>&1 || { emit_context "cc-cnf-sync: git is not installed; memory not synced. Install git (it also provides the credential helper the sync uses)."; exit 0; }
 
-# ── stable key (MUST match norm_key() in commands/backup.md) ────────
+# ── stable key (MUST match norm_key() in commands/export.md) ────────
 norm_key() {
   k=$1
   case "$k" in *.git) k=${k%.git} ;; esac
@@ -148,6 +150,16 @@ union_merge() {
   cdir=$1; ldir=$2
   mkdir -p "$cdir" "$ldir" 2>/dev/null
   STATE="$ldir/.cc-cnf-sync-conflicts"
+  # Deliberate real-note deletions (from the /memory command) propagate via a
+  # <note>.md.deleted tombstone. Apply them FIRST so the loops below can't resurrect the
+  # note. Accidental `rm` of a real note does NOT create a tombstone (only /memory does),
+  # so it still safely reappears — this branch only fires on an intentional deletion.
+  for tomb in "$cdir"/*.md.deleted; do
+    [ -e "$tomb" ] || continue
+    case "$tomb" in *.conflict.md.deleted) continue ;; esac   # conflict tombstones handled in the lifecycle below
+    t=$(basename "${tomb%.deleted}")                          # <note>.md
+    rm -f "$cdir/$t" "$ldir/$t" 2>/dev/null
+  done
   # remote -> local
   for rf in "$cdir"/*.md; do
     [ -e "$rf" ] || continue
@@ -172,6 +184,7 @@ union_merge() {
     base=$(basename "$lf")
     case "$base" in *.conflict.md) continue ;; esac
     [ "$base" = "MEMORY.md" ] && continue
+    [ -e "$cdir/$base.deleted" ] && { rm -f "$lf" 2>/dev/null; continue; }   # tombstoned real note → don't resurrect
     [ -e "$cdir/$base" ] || cp "$lf" "$cdir/$base" 2>/dev/null
   done
   # MEMORY.md: union of unique lines (order: remote first, then local-only)
