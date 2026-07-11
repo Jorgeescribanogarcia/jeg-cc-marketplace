@@ -19,8 +19,8 @@ exposes it).
   ✅ GitHub MCP is already configured and working (@<username>).
 
   You are ready to use:
-    /backup  - Upload your config to GitHub
-    /restore - Restore your config from GitHub
+    /export  - Upload your config to GitHub
+    /import  - Restore your config from GitHub
     /status  - Show status and last backup date
   ```
 
@@ -53,7 +53,7 @@ MCP. Read the authenticated `@<username>` from its output and show:
 ✅ Setup complete! GitHub token validated and MCP installed (@<username>).
 
 ⚠️  Restart Claude Code so the MCP reconnects with the new token.
-    After restarting, run /status to confirm, then /backup.
+    After restarting, run /status to confirm, then /export.
 ```
 Then **stop** (do not try to call the MCP in this same session — MCP servers only
 reconnect on restart, so an in-session call would still use the old connection).
@@ -91,7 +91,7 @@ Check that the Claude Code CLI is on PATH and try /setup again.
   re-validates and reinstalls the MCP with the current token.
 - Cross-platform: on Windows the same script runs under Git Bash, and `~` maps to
   `C:\Users\<you>`, so no OS-specific paths are needed.
-- The token configured here is for the **GitHub MCP** (`/backup`, `/restore`, `/status`). The
+- The token configured here is for the **GitHub MCP** (`/export`, `/import`, `/status`). The
   **memory-sync hook does not use it** — it authenticates through the machine's git credential helper
   (git-credential-manager / `osxkeychain` / libsecret / `gh`). Setup also records the backup repo URL to
   `~/.config/cc-cnf-sync/repo` so the hook knows where to push without needing a token or an API call.
