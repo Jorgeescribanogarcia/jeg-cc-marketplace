@@ -32,9 +32,12 @@ On every SessionStart/SessionEnd, for the project you have open:
 Result: open the project anywhere → its notes are there and up to date, both directions.
 ```
 
-Merge rules (all lossless): a note that exists on only one side is copied to the other; a note that
-diverged on two machines keeps **both** copies (`<name>.md` + `<name>.conflict.md`, compared ignoring
-CRLF/LF so line-endings alone never cause a false conflict); `MEMORY.md` (the index) is line-unioned.
+Merge rules (all lossless): a note that exists on only one side is copied to the other. For a note that
+exists on both, the sync does a **3-way merge** against the version this machine last synced (the base):
+if only one side changed, that edit wins with **no conflict** — so simply editing a note is never treated
+as a conflict. Only when **both** sides changed the same note since the last sync are both copies kept
+(`<name>.md` + `<name>.conflict.md`, compared ignoring CRLF/LF so line-endings alone never trigger it).
+`MEMORY.md` (the index) is line-unioned.
 
 Deletions are treated by kind. A plain `rm` of a **real note** does **not** propagate — it reappears from
 the other machine — so an accidental delete is never silently mirrored everywhere. To remove a real note
@@ -43,6 +46,14 @@ the other machine — so an accidental delete is never silently mirrored everywh
 a note: once you reconcile it into `<name>.md` and delete it, that removal **also** propagates via a
 `<name>.conflict.md.deleted` tombstone, so conflict files never pile up. (To bring a deleted note back,
 remove its tombstone from `memory/<safeKey>/` in the backup.)
+
+**Your global config rides along too.** Beyond per-project memory, the same hook continuously syncs your
+user-level config — `CLAUDE.md`, `keybindings.json`, `settings.json`, `plugins.json`, and your
+`commands/`, `skills/` and `agents/` folders — with the identical 3-way, conflict-safe logic. Edit your
+global `CLAUDE.md` on one machine and it reaches the others automatically. It's a **strict allowlist**:
+nothing else is ever touched, and anything machine-specific belongs in `settings.local.json`, which is
+**never** synced (nor are `.credentials.json`, history, or tokens). A genuine two-sided edit of the same
+config file keeps your local copy and saves the other version as a `.cc-conflict` sidecar.
 
 Requirements on each machine: `git`, plus a git credential for `github.com` that the OS credential
 helper already holds — git-credential-manager on Windows, `osxkeychain` on macOS, libsecret/store on
