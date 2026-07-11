@@ -6,14 +6,14 @@
   },
   "metadata": {
     "description": "JEG Claude Marketplace — Community plugins for Claude Code",
-    "version": "3.5.0"
+    "version": "3.5.1"
   },
   "plugins": [
     {
       "name": "cc-cnf-sync",
       "source": "./plugins/cc-cnf-sync",
       "description": "Backup and restore Claude Code configuration, with per-project memory AND global user config (CLAUDE.md, commands, skills, agents, settings) kept in continuous two-way sync across machines/OS via SessionStart/SessionEnd hooks. Conflict-safe 3-way merge — editing a note never self-conflicts, and divergent edits are never lost. The hook authenticates through the machine's own git credential helper — no personal access token to expire. Backed by a private GitHub repository, fully portable across Linux, macOS and Windows. Run /setup after installing.",
-      "version": "3.5.0",
+      "version": "3.5.1",
       "author": {
         "name": "Jorgeescribanogarcia",
         "url": "https://github.com/Jorgeescribanogarcia"
