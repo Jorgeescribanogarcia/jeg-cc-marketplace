@@ -4,7 +4,7 @@ Cleanly remove cc-cnf-sync from this machine — the plugin, its saved token, an
 (optionally) the GitHub MCP. Works on **Linux, macOS and Windows** (Git Bash).
 
 > ⚠️ This does **not** touch your backups on GitHub. Your `claude-code-config`
-> repository and everything in it stays intact — you can always `/restore` later.
+> repository and everything in it stays intact — you can always `/import` later.
 
 ## Steps to follow
 

@@ -1,4 +1,4 @@
-# /backup
+# /export
 
 Upload your configuration to GitHub. Works on **Linux, macOS and Windows** (Git Bash).
 
@@ -19,7 +19,7 @@ Look for any entry containing "github" in the output.
 ❌ GitHub MCP not found.
 
 Run /setup first to configure the GitHub MCP,
-then restart Claude Code and run /backup again.
+then restart Claude Code and run /export again.
 ```
 
 **If GitHub MCP IS found**, continue to Step 2.
@@ -38,7 +38,7 @@ MCP is not installed, stop and show:
 ❌ No active GitHub session.
 
 Run /setup to configure your GitHub token,
-then restart Claude Code and run /backup again.
+then restart Claude Code and run /export again.
 ```
 
 **If authenticated**, save the username and continue.
@@ -106,7 +106,7 @@ echo "$TEMP_DIR"
 
 Instead of copying the machine-specific plugin JSONs, distill a portable manifest from the
 Claude Code CLI. It records only *what* is installed and *which marketplace* it came from —
-no absolute paths, no local cache dirs — so `/restore` can rebuild it on any machine/OS.
+no absolute paths, no local cache dirs — so `/import` can rebuild it on any machine/OS.
 
 Run these two commands and read their JSON output:
 
@@ -152,7 +152,7 @@ follow the project to another machine. Instead we key each project's memory by a
 the normalized **git remote URL** (identical on every clone/OS), falling back to the folder name.
 
 The `SessionStart`/`SessionEnd` hook (`hooks/sync-memory.sh`) recomputes this same key on every machine
-and **bidirectionally syncs** the memory (pull + merge + push) automatically, so this `/backup` is just a
+and **bidirectionally syncs** the memory (pull + merge + push) automatically, so this `/export` is just a
 full manual snapshot on top of the same layout. Run this `bash` (works on Linux, macOS and Windows via
 Git Bash); the key rules **must stay identical** to `norm_key()` in `hooks/sync-memory.sh`:
 

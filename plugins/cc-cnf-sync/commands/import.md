@@ -1,4 +1,4 @@
-# /restore
+# /import
 
 Restore your configuration from GitHub. Works on **Linux, macOS and Windows** (Git Bash).
 
@@ -16,7 +16,7 @@ claude mcp list
 ❌ GitHub MCP not found.
 
 Run /setup first to configure the GitHub MCP,
-then restart Claude Code and run /restore again.
+then restart Claude Code and run /import again.
 ```
 
 **If found**, continue.
@@ -35,7 +35,7 @@ MCP is not installed, stop and show:
 ❌ No active GitHub session.
 
 Run /setup to configure your GitHub token,
-then restart Claude Code and run /restore again.
+then restart Claude Code and run /import again.
 ```
 
 **If authenticated**, save the username and continue.
@@ -50,7 +50,7 @@ Use the GitHub MCP to check if `claude-code-config` exists for the authenticated
 ```
 ❌ Backup repository not found.
 
-You haven't created a backup yet. Run /backup first.
+You haven't created a backup yet. Run /export first.
 ```
 
 **If found**, continue.
@@ -148,7 +148,7 @@ claude plugin disable "<id>"
 ```
 
 If `plugins.json` is **absent** (legacy backup made before this version), tell the user their
-backup predates portable plugin sync and they should run `/backup` again after restoring, then
+backup predates portable plugin sync and they should run `/export` again after restoring, then
 reinstall plugins manually with `claude plugin install <name>@<marketplace>`.
 
 ---
