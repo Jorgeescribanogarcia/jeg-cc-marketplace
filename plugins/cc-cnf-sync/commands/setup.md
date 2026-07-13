@@ -1,40 +1,20 @@
 # /setup
 
-First-time setup — validates your GitHub token and configures the GitHub MCP for Claude Code.
+First-time setup — authenticates with GitHub through the **GitHub CLI (`gh`)** and prepares
+your private backup repository. No personal access token is stored by this plugin: `gh` keeps
+the credential in your OS credential store, and wires `git` to use it (which is also how the
+memory-sync hook authenticates).
 
-Works on **Linux, macOS and Windows** (on Windows, Claude Code runs commands through
-Git Bash, so the same `bash` script is used everywhere).
+Works on **Linux, macOS and Windows** (on Windows, Claude Code runs commands through Git Bash,
+so the same `bash` script is used everywhere).
 
 ## Steps to follow
 
-### STEP 1 — Check if the GitHub MCP already works
-
-Call any **authenticated** GitHub MCP endpoint to test the current connection — for
-example `search_repositories` with query `user:@me` (or `get_me` if the server
-exposes it).
-
-- **If the call succeeds** (returns data, no auth error): the MCP is already
-  configured and working. Show this and **stop**:
-  ```
-  ✅ GitHub MCP is already configured and working (@<username>).
-
-  You are ready to use:
-    /export  - Upload your config to GitHub
-    /import  - Restore your config from GitHub
-    /status  - Show status and last backup date
-  ```
-
-- **If the call fails** with an authentication error (e.g. "Bad credentials"), or the
-  `github` MCP is not installed at all: continue to Step 2. **Do not** treat a merely
-  *present* MCP entry as working — it must actually authenticate.
-
----
-
-### STEP 2 — Run the setup script
+### STEP 1 — Run the setup script
 
 Tell the user:
 ```
-Running setup script...
+Running setup...
 ```
 
 Then execute (capture BOTH the output and the exit code):
@@ -42,56 +22,76 @@ Then execute (capture BOTH the output and the exit code):
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/setup-cc-cnf-sync.sh"
 ```
 
-The script resolves the token from its first argument, then the
-`GITHUB_PERSONAL_ACCESS_TOKEN` environment variable, then a token file saved by a
-previous run (`~/.config/cc-cnf-sync/token`). It **validates the token against the
-GitHub API**, and only then (re)installs the GitHub MCP. Branch on its exit code:
+The script checks that `gh` is installed and authenticated, runs `gh auth setup-git` so plain
+`git` pushes to github.com work, and ensures your private `claude-code-config` repo exists. It
+stores **no token** — only the backup repo URL at `~/.config/cc-cnf-sync/repo`. Branch on its
+exit code:
 
-**Exit code 0 — success.** The script already validated the token and installed the
-MCP. Read the authenticated `@<username>` from its output and show:
+---
+
+**Exit code 0 — success.** The last output line is `OK:<username>`. Everything is ready and
+**no restart is needed** (there is no MCP to reconnect). Show:
 ```
-✅ Setup complete! GitHub token validated and MCP installed (@<username>).
+✅ Setup complete! Authenticated as @<username> via the GitHub CLI.
+   Backup repo: https://github.com/<username>/claude-code-config
 
-⚠️  Restart Claude Code so the MCP reconnects with the new token.
-    After restarting, run /status to confirm, then /export.
+You are ready to use:
+  /export  - Upload your config to GitHub
+  /import  - Restore your config from GitHub
+  /status  - Show status and last backup date
 ```
-Then **stop** (do not try to call the MCP in this same session — MCP servers only
-reconnect on restart, so an in-session call would still use the old connection).
 
-**Exit code 2 — token missing or rejected by GitHub.** The script wrote a
-`githubToken.sh` helper to the current folder and printed its full path. Show the
-user a clear, friendly message, including a clickable folder link built from that
-absolute path:
+---
+
+**Exit code 2 — `gh` is installed but NOT authenticated** (or the stored token expired). The
+user must log in once through the browser. Show them this and **stop** — they run the login
+themselves (they can type it in this session with the leading `!`):
 ```
-⚠️ You need a valid GitHub token (with the 'repo' scope) to continue.
+⚠️ You need to sign in to GitHub once with the GitHub CLI.
 
-1. Open the helper folder: [Open folder](file:///<ABSOLUTE_FOLDER_PATH>/)
-2. Run `bash githubToken.sh`, paste a valid token, and press Enter.
-   (Create the token at https://github.com/settings/tokens with the 'repo' scope.)
-3. Come back here and run /setup again.
+1. Run this (it opens your browser; approve there — or paste the device code if headless):
+
+     ! gh auth login --hostname github.com --git-protocol https --web --skip-ssh-key -s repo
+
+2. When gh says you're logged in, run /setup again — it will finish automatically.
 ```
-Then **stop**.
+> The `repo` scope is required so the private backup repo can be created and pushed to.
+> On a headless/SSH machine, gh prints a one-time code + URL instead of opening a browser.
 
-**Exit code 1 — install error.** Show:
+---
+
+**Exit code 3 — `gh` is NOT installed.** The script printed an `INSTALL_HINT:` line with the
+right command for this OS. Show it and **stop**:
 ```
-❌ Setup failed while installing the GitHub MCP.
+⚠️ The GitHub CLI (gh) is not installed. Install it, then run /setup again.
 
-Check that the Claude Code CLI is on PATH and try /setup again.
+  <the INSTALL_HINT command from the script output>
+
+(More options: https://github.com/cli/cli#installation)
+```
+
+---
+
+**Exit code 1 — unexpected error** (e.g. the backup repo could not be created). Show the
+script's error output and suggest checking that the gh token has the `repo` scope, then retry:
+```
+❌ Setup failed. See the message above.
+
+If it mentions the repo, re-run the login with the 'repo' scope:
+  ! gh auth login --hostname github.com --git-protocol https --web --skip-ssh-key -s repo
+then run /setup again.
 ```
 
 ---
 
 ### Notes
 
-- The token is never printed in chat: it is entered through `githubToken.sh` (which
-  saves it to `~/.config/cc-cnf-sync/token` with `chmod 600`) or passed directly to
-  the script.
-- To **change** an already-working token, run `githubToken.sh` with the new token
-  (or export `GITHUB_PERSONAL_ACCESS_TOKEN`) and run /setup again — the script always
-  re-validates and reinstalls the MCP with the current token.
+- **No token is stored by this plugin.** `gh` owns the credential (OS credential store when
+  available). To change accounts, run `gh auth logout` then `gh auth login` and `/setup` again.
+- `gh auth setup-git` makes `git push`/`fetch` to github.com authenticate through gh — the same
+  mechanism the `SessionStart`/`SessionEnd` memory-sync hook uses, so once `/setup` succeeds the
+  hook syncs automatically with nothing extra to configure.
+- The only file this plugin writes is `~/.config/cc-cnf-sync/repo` (the non-secret backup URL),
+  so `/export`, `/import`, `/status` and the hook all know where to push/pull.
 - Cross-platform: on Windows the same script runs under Git Bash, and `~` maps to
   `C:\Users\<you>`, so no OS-specific paths are needed.
-- The token configured here is for the **GitHub MCP** (`/export`, `/import`, `/status`). The
-  **memory-sync hook does not use it** — it authenticates through the machine's git credential helper
-  (git-credential-manager / `osxkeychain` / libsecret / `gh`). Setup also records the backup repo URL to
-  `~/.config/cc-cnf-sync/repo` so the hook knows where to push without needing a token or an API call.
