@@ -159,8 +159,11 @@ MEM_DEST="$TEMP_DIR/memory"
 
 # Normalize a git remote (or folder name) into an OS-independent key.
 # MUST stay identical to norm_key() in hooks/sync-memory.sh.
+# Input is read from $nk_arg, NOT a positional $1: Claude Code substitutes $1/$0/… inside a
+# slash command's bash with empty strings, so `k=$1` would silently become `k=` at runtime
+# (→ empty keys → every project mis-keyed). $nk_arg is a plain variable, immune to that.
 norm_key() {
-  k=$1
+  k=$nk_arg
   case "$k" in *.git) k=${k%.git} ;; esac
   case "$k" in *@*:*) host=${k#*@}; host=${host%%:*}; path=${k#*:}; k="$host/$path" ;; esac
   k=$(printf '%s' "$k" | sed -E 's#^[a-zA-Z]+://##; s#^[^@/]*@##')
@@ -195,7 +198,7 @@ if [ -d "$SOURCE_PROJECTS" ]; then
     if [ -n "$cwd" ]; then
       remote=$(git -C "$cwd" remote get-url origin 2>/dev/null)
       if [ -n "$remote" ]; then
-        key=$(norm_key "$remote")
+        nk_arg="$remote"; key=$(norm_key)
       else
         key="local/$(basename "$cwd" | tr 'A-Z' 'a-z')"
       fi
@@ -247,9 +250,12 @@ if [ -f "$TEMP_DIR/prev-manifest.json" ]; then
   carried=$((total - count))
 fi
 
-# Join the per-line JSON objects into the manifest array. (Command substitution strips the
-# trailing newline, so the closing `]` gets its own \n from the format string, not from awk.)
-body=$(awk 'NR>1{printf ",\n"} {printf "%s", $0}' "$ENTRIES_FILE")
+# Join the per-line JSON objects into the manifest array: append a comma to every line except
+# the last. Done with sed, NOT `awk '{print $0}'` — Claude Code's slash-command substitution
+# would replace awk's $0 with empty at runtime, emitting nothing. (`$!`/`$` here are sed
+# addresses/anchors, not positional params, so they survive.) $(...) strips the trailing
+# newline, so the closing `]` gets its own \n from the format string.
+body=$(sed '$!s/$/,/' "$ENTRIES_FILE")
 printf '{\n  "schema": 2,\n  "projects": [\n%s\n  ]\n}\n' "$body" > "$TEMP_DIR/memory-manifest.json"
 rm -f "$ENTRIES_FILE" "$SAFES_FILE"
 echo "Memory: $count project(s) from this machine, $carried carried from other machines."

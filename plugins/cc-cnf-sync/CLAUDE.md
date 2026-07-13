@@ -30,15 +30,19 @@ machines/OS via `SessionStart`/`SessionEnd` hooks.
 
 ## ⚠️ Critical invariant — `norm_key()` is triplicated
 
-The memory key function `norm_key()` MUST stay **byte-identical** in all three:
+The memory key function `norm_key()` MUST stay **functionally identical** (same input → same key)
+in all three:
 - `hooks/sync-memory.sh`
 - `commands/export.md`
 - `commands/memory.md`
 
-It normalizes a git remote (or folder name) into an OS-independent key. If you change one, change
-all three, or memory folders stop resolving across machines. The key derivation:
-`git remote origin → norm_key → key`; fallbacks `local/<folder>` (no remote) then `slug/<slug>`
-(no cwd). `safeKey` = key with non-`[a-z0-9._-]` → `-`; it's the folder name under `memory/`.
+If you change one, change all three, or memory folders stop resolving across machines. The key
+derivation: `git remote origin → norm_key → key`; fallbacks `local/<folder>` (no remote) then
+`slug/<slug>` (no cwd). `safeKey` = key with non-`[a-z0-9._-]` → `-`; it's the folder name under
+`memory/`.
+
+**Input comes from `$nk_arg`, NOT a positional `$1`** — see the slash-command gotcha below. All
+three read `k=$nk_arg` and are called as `nk_arg=<value>; key=$(norm_key)`, so they stay identical.
 
 ## Per-machine state files — NEVER back these up
 
@@ -80,6 +84,16 @@ merges the prev manifest (fetched via `gh api … Accept: raw`) — do not regen
 - `CC_SYNC_CACHE` — override the cache clone dir (default `~/.claude/cc-cnf-sync/cache/config`).
 - `CC_SYNC_CONFIG_HOME` — override `~/.claude` for the global-config sync.
 - `CC_SYNC_INPUT` / `CC_SYNC_BG` — used by the SessionEnd detach re-invocation.
+
+## ⚠️ Slash-command `$1`/`$0` substitution (bit us in v3.x → fixed v4.0.1)
+
+Claude Code substitutes `$1`, `$2`, … `$9`, `$0` and `$ARGUMENTS` inside a **command `.md`'s bash
+blocks** with the invocation's arguments — even inside single-quoted strings and awk programs.
+With no args, `k=$1` runs as `k=` and `awk '{print $0}'` as `awk '{print }'`. This silently broke
+`norm_key()` (empty keys) and the manifest join. **Never use positional params in a command's
+bash**: read inputs from a named var (`$nk_arg`), and join/parse without awk `$0` (we use
+`sed '$!s/$/,/'`). `$ARGUMENTS` is the ONE intended exception (used by `/memory`). The hook is a
+plain script (not slash-substituted) but mirrors the `$nk_arg` form to keep `norm_key()` identical.
 
 ## Git Bash gotchas (this plugin is tested on Windows)
 
