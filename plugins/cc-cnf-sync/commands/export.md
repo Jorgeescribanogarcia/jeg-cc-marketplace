@@ -175,7 +175,11 @@ norm_key() {
   printf '%s' "$k" | tr 'A-Z' 'a-z'
 }
 
-entries=""
+# Accumulate manifest entries in files (not a shell var): the additive-merge step below
+# reads prev entries in a pipe subshell, which can't append to a variable.
+ENTRIES_FILE="$TEMP_DIR/.mani-entries"   # one JSON object per line
+SAFES_FILE="$TEMP_DIR/.mani-safes"       # safeKeys generated this run (for the union merge)
+: > "$ENTRIES_FILE"; : > "$SAFES_FILE"
 count=0
 if [ -d "$SOURCE_PROJECTS" ]; then
   for pdir in "$SOURCE_PROJECTS"/*/; do
@@ -187,8 +191,13 @@ if [ -d "$SOURCE_PROJECTS" ]; then
 
     # Recover the project's real cwd from ANY session transcript (the slug can't be reversed
     # reliably, and the first .jsonl may be a summary sidecar with no cwd — so scan them all).
-    cwd=$(sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$pdir"*.jsonl 2>/dev/null | head -n1)
-    cwd=$(printf '%s' "$cwd" | sed 's#\\\\#\\#g' | tr '\\' '/')
+    # Use grep (not sed): a `sed -n 's/..."cwd"...\1/p'` over the .jsonl aborts with
+    # "unterminated `s' command" under Git Bash, silently emptying cwd → keys fall back to
+    # `slug/...` and create duplicate memory folders. grep|cut is robust everywhere.
+    cwd=$(grep -ho '"cwd"[ ]*:[ ]*"[^"]*"' "$pdir"*.jsonl 2>/dev/null | head -1 | cut -d'"' -f4)
+    # Normalize a Windows cwd (JSON-escaped `C:\\Users\\...`) to forward slashes. Plain
+    # `tr '\\' '/'` collapses the escaped `\\` into `//`; squash runs of slashes back to one.
+    cwd=$(printf '%s' "$cwd" | tr '\\' '/' | sed 's#//*#/#g')
 
     key=""
     if [ -n "$cwd" ]; then
@@ -204,30 +213,54 @@ if [ -d "$SOURCE_PROJECTS" ]; then
     if [ -n "$cwd" ]; then name=$(basename "$cwd"); else name=$slug; fi
 
     mkdir -p "$MEM_DEST/$safe"
-    cp -r "$mdir/." "$MEM_DEST/$safe/"
+    cp -r "$mdir/." "$MEM_DEST/$safe/" 2>/dev/null
+    # NEVER back up the hook's per-machine state (.cc-cnf-sync-base, -conflicts, -checked):
+    # those are local-only 3-way bases; uploading them corrupts the merge on other machines.
+    rm -f "$MEM_DEST/$safe"/.cc-cnf-sync-* 2>/dev/null
 
     # Rename-robustness: if a previous backup keyed THIS project (matched by slug — stable on
     # the same machine) under a DIFFERENT safeKey, the repo was likely renamed. Drop a sidecar
     # `memory/<oldSafeKey>.alias` (one line = the current safeKey) so a clone that still computes
     # the old key keeps resolving to the up-to-date notes. Read by norm_key()'s companion logic
-    # in hooks/sync-memory.sh.
+    # in hooks/sync-memory.sh. (grep|cut, not sed -n 's/…/p' — that aborts under Git Bash.)
     if [ -f "$TEMP_DIR/prev-manifest.json" ]; then
       prevsafe=$(grep -F "\"slug\": \"$slug\"" "$TEMP_DIR/prev-manifest.json" 2>/dev/null \
-                 | sed -n 's/.*"safeKey"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+                 | grep -o '"safeKey"[ ]*:[ ]*"[^"]*"' | head -1 | cut -d'"' -f4)
       if [ -n "$prevsafe" ] && [ "$prevsafe" != "$safe" ]; then
         printf '%s\n' "$safe" > "$MEM_DEST/$prevsafe.alias"
       fi
     fi
 
-    [ -n "$entries" ] && entries="$entries,"
-    entries="$entries
-    { \"slug\": \"$slug\", \"key\": \"$key\", \"safeKey\": \"$safe\", \"name\": \"$name\", \"files\": $fcount }"
+    printf '    { "slug": "%s", "key": "%s", "safeKey": "%s", "name": "%s", "files": %s }\n' \
+      "$slug" "$key" "$safe" "$name" "$fcount" >> "$ENTRIES_FILE"
+    printf '%s\n' "$safe" >> "$SAFES_FILE"
     count=$((count+1))
   done
 fi
 
-printf '{\n  "schema": 2,\n  "projects": [%s\n  ]\n}\n' "$entries" > "$TEMP_DIR/memory-manifest.json"
-echo "Memory: $count project(s) collected."
+# ADDITIVE merge (union by safeKey): carry over every project the repo's previous manifest
+# had that THIS machine doesn't (other machines' projects, or a project's previous name).
+# Regenerating from only the local machine would silently PRUNE foreign projects from the
+# inventory even though their memory/ folders survive — the manifest must be a union.
+carried=0
+if [ -f "$TEMP_DIR/prev-manifest.json" ]; then
+  grep -o '{[^{}]*}' "$TEMP_DIR/prev-manifest.json" 2>/dev/null | while IFS= read -r obj; do
+    psafe=$(printf '%s' "$obj" | grep -o '"safeKey"[ ]*:[ ]*"[^"]*"' | head -1 | cut -d'"' -f4)
+    [ -n "$psafe" ] || continue
+    grep -qxF "$psafe" "$SAFES_FILE" 2>/dev/null && continue   # already regenerated this run
+    printf '    %s\n' "$obj" >> "$ENTRIES_FILE"
+    printf '%s\n' "$psafe" >> "$SAFES_FILE"                    # guard against dups within prev
+  done
+  total=$(wc -l < "$SAFES_FILE" 2>/dev/null | tr -d ' '); [ -n "$total" ] || total=0
+  carried=$((total - count))
+fi
+
+# Join the per-line JSON objects into the manifest array. (Command substitution strips the
+# trailing newline, so the closing `]` gets its own \n from the format string, not from awk.)
+body=$(awk 'NR>1{printf ",\n"} {printf "%s", $0}' "$ENTRIES_FILE")
+printf '{\n  "schema": 2,\n  "projects": [\n%s\n  ]\n}\n' "$body" > "$TEMP_DIR/memory-manifest.json"
+rm -f "$ENTRIES_FILE" "$SAFES_FILE"
+echo "Memory: $count project(s) from this machine, $carried carried from other machines."
 ```
 
 This writes each project's notes to `memory/<safeKey>/...` in the temp dir plus a
@@ -281,14 +314,34 @@ commands: `claude --version`, `uname -s` (OS, prints "Windows" if it fails), and
 
 ### STEP 6 — Upload files to GitHub
 
-Use the GitHub MCP to upload each collected file to the `claude-code-config` repository, preserving the directory structure.
+**Preferred: upload with `git` (one commit, handles large memory trees).**
+Uploading file-by-file through the GitHub MCP is impractical once memory grows to tens of KB
+across many projects (slow, and each file is a separate API round-trip). If `git` is available
+and authenticated for github.com (the same credential helper the hook uses), push everything in
+one additive commit. This preserves any files already in the repo that this backup didn't
+regenerate (other machines' memory, etc.):
 
-Use this commit message:
-```
-backup: <date> - Claude Code config sync
+```bash
+CLONE="${TMPDIR:-/tmp}/cc-cnf-sync-push-$TS"
+REPO_URL="https://github.com/<username>/claude-code-config.git"   # from STEP 2/3
+GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$REPO_URL" "$CLONE" || exit 1
+
+# Copy the snapshot over the clone (additive: never delete the repo's existing files here).
+# $TEMP_DIR has no .git, so the clone's own .git is left intact.
+cp -R "$TEMP_DIR"/. "$CLONE"/
+
+cd "$CLONE"
+git add -A
+git -c user.name="cc-cnf-sync" -c user.email="export@$(hostname)" \
+    commit -q -m "backup: $(date +%Y-%m-%d) - Claude Code config sync" || echo "nothing to commit"
+GIT_TERMINAL_PROMPT=0 git push origin HEAD
 ```
 
-Show progress as each file is uploaded.
+**Fallback: GitHub MCP.** If `git` is not available/authenticated, use the GitHub MCP to upload
+each collected file to the `claude-code-config` repository, preserving the directory structure,
+with commit message `backup: <date> - Claude Code config sync`. Show progress as each file is
+uploaded. Either way the upload is **additive** — never delete `memory/` folders the repo already
+has (see STEP 4c).
 
 ---
 
