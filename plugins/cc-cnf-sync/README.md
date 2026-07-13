@@ -70,28 +70,33 @@ regardless, so nothing is lost either way).
 
 | Command | Description |
 |---|---|
-| `/setup` | First-time setup — configures GitHub token and MCP automatically |
+| `/setup` | First-time setup — signs in with the GitHub CLI (`gh`) and prepares your backup repo |
 | `/export` | Upload your configuration to GitHub |
 | `/import` | Restore your configuration from GitHub |
 | `/status` | Show status and last backup date |
 | `/memory` | View and manage synced memory — list / view / delete notes without opening GitHub |
-| `/uninstall` | Remove the plugin, saved token and (optionally) the GitHub MCP |
+| `/uninstall` | Remove the plugin and its local files (your backup and `gh` login are untouched) |
 
 ## Requirements
 
 - Claude Code v22+
 - Git Bash on Windows (Claude Code already requires it) — no extra setup on Linux/macOS
-- A GitHub personal access token with `repo` scope (the `/setup` command will guide you)
-- For the cross-machine memory hook: `git` on `PATH` (on Windows, Git Bash — bundled with Git) **and a working git credential for github.com** (its credential manager, or `gh auth login`). No PAT is needed for the hook — it uses git's own credentials. If either is missing, the hook simply does nothing; the rest of the plugin still works.
+- The **GitHub CLI (`gh`)** — `/setup` uses it to sign in (it requests the `repo` scope). Install
+  from https://github.com/cli/cli#installation if you don't have it.
+- For the cross-machine memory hook: `git` on `PATH` (on Windows, Git Bash — bundled with Git). It
+  authenticates through the same `gh` login `/setup` sets up (`gh auth setup-git`), so there's
+  nothing extra to configure. If `git`/auth is missing, the hook simply does nothing; the rest of
+  the plugin still works.
 
 ## How setup works
 
-`/setup` validates your GitHub token against the GitHub API **before** installing the
-MCP, so an expired or wrong-scope token is caught up front instead of failing later.
-If no valid token is found, it drops a `githubToken.sh` helper for you to paste one
-in (keeping the secret out of the chat; the token is saved to `~/.config/cc-cnf-sync/token`
-with `chmod 600`), then re-run `/setup`. After a successful setup, **restart Claude Code**
-so the MCP reconnects with the new token.
+`/setup` delegates **all** authentication to the GitHub CLI — this plugin never stores a token.
+It checks that `gh` is installed and authenticated; if not, it points you to a one-line
+`gh auth login` (browser or device-code OAuth). `gh` keeps the credential in your **OS credential
+store** (Windows Credential Manager / macOS Keychain / libsecret), and `gh auth setup-git` wires
+`git` to use it — the same mechanism the memory-sync hook relies on. `/setup` then ensures your
+private `claude-code-config` repo exists and records only its (non-secret) URL to
+`~/.config/cc-cnf-sync/repo`. **No restart needed** — there's no MCP to reconnect.
 
 ## Quick start
 
@@ -107,7 +112,8 @@ Restart Claude Code, then run:
 
 ## Uninstall
 
-Run the guided command, which also removes the saved token and (after asking) the GitHub MCP:
+Run the guided command, which removes the plugin's local files (your GitHub backup and your `gh`
+login are left untouched):
 
 ```
 /uninstall

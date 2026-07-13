@@ -1,134 +1,106 @@
 #!/usr/bin/env bash
 # setup-cc-cnf-sync.sh
-# Cross-platform (Linux / macOS / Windows Git Bash) setup for the GitHub MCP.
+# Cross-platform (Linux / macOS / Windows Git Bash) setup, powered by the GitHub CLI (gh).
 # Called automatically by /setup.
 #
-# Runs headlessly (no interactive prompt that would hang inside Claude Code):
-#   1. Token resolved from $1, then $GITHUB_PERSONAL_ACCESS_TOKEN, then a saved token file.
-#   2. Token is validated against the GitHub API (https://api.github.com/user).
-#   3. If missing OR rejected by GitHub, a `githubToken.sh` helper is written to the
-#      current folder and the script exits with code 2 so /setup can guide the user.
-#   4. Only a VALID token gets the GitHub MCP (re)installed.
+# Design: this plugin NEVER stores a secret. All authentication is delegated to `gh`, which
+# keeps the token in the OS credential store (Windows Credential Manager / macOS Keychain /
+# libsecret), falling back to its own 600 file only where no store exists. `gh auth setup-git`
+# then makes plain `git push` to github.com work — which is exactly how the memory-sync hook
+# authenticates. The only thing this plugin persists is the (non-secret) backup repo URL.
+#
+# Runs headlessly (no interactive prompt that would hang inside Claude Code). The one
+# unavoidably-interactive step — `gh auth login` (browser/device OAuth) — is NOT run here;
+# on exit code 2, /setup asks the user to run it themselves, then re-runs this script.
+#
+# Exit codes (consumed by /setup):
+#   0 — gh present + authenticated + git wired + backup repo ensured. Prints "OK:<login>".
+#   2 — gh present but NOT authenticated (or token invalid). Prints "UNAUTH".
+#   3 — gh NOT installed. Prints "MISSING" + a per-OS install hint.
+#   1 — unexpected error (e.g. repo create failed).
 
 set -u
 
-TOKEN="${1:-}"
-TOKEN_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/cc-cnf-sync"
-TOKEN_FILE="$TOKEN_DIR/token"
+CFG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/cc-cnf-sync"
+REPO_NAME="claude-code-config"
+REPO_DESC="Automated backup and restore of Claude Code configuration files (settings, plugins, commands, skills, agents) synced to a private GitHub repository."
 
 echo ""
 echo "================================================"
-echo "  cc-cnf-sync - Setup"
+echo "  cc-cnf-sync - Setup (GitHub CLI)"
 echo "================================================"
 echo ""
 
-# ── Helper: write the token-entry assistant (keeps the secret out of chat) ──
-write_token_helper() {
-    local helper
-    helper="$(pwd)/githubToken.sh"
-    cat > "$helper" <<EOF
-#!/usr/bin/env bash
-# Paste a GitHub token (scope 'repo') without exposing it in the chat.
-echo "================================================"
-echo "  GITHUB TOKEN - cc-cnf-sync"
-echo "================================================"
-echo ""
-echo "Create a token with the 'repo' scope at:"
-echo "  https://github.com/settings/tokens"
-echo ""
-printf "Paste your GitHub token: "
-read -r T
-if [ -z "\$T" ]; then
-  echo "ERROR: no token entered."
-  exit 1
+# ── STEP 1: is gh installed? ───────────────────────────────────────
+echo "STEP 1/4 - Checking for the GitHub CLI (gh)..."
+if ! command -v gh >/dev/null 2>&1; then
+  os=$(uname -s 2>/dev/null || echo unknown)
+  case "$os" in
+    Darwin) hint="brew install gh" ;;
+    Linux)
+      if   command -v pacman >/dev/null 2>&1; then hint="sudo pacman -S github-cli"
+      elif command -v apt    >/dev/null 2>&1; then hint="sudo apt install gh"
+      elif command -v dnf    >/dev/null 2>&1; then hint="sudo dnf install gh"
+      elif command -v zypper >/dev/null 2>&1; then hint="sudo zypper install gh"
+      else hint="see https://github.com/cli/cli#installation"
+      fi ;;
+    *MINGW*|*MSYS*|*CYGWIN*) hint="winget install --id GitHub.cli   (or: scoop install gh)" ;;
+    *) hint="see https://github.com/cli/cli#installation" ;;
+  esac
+  echo "  [MISSING] gh is not installed."
+  echo "MISSING"
+  echo "INSTALL_HINT: $hint"
+  exit 3
 fi
-mkdir -p "$TOKEN_DIR"
-printf '%s' "\$T" > "$TOKEN_FILE"
-chmod 600 "$TOKEN_FILE" 2>/dev/null || true
-echo ""
-echo "Done! Token saved for your user account."
-echo "Go back to Claude Code and run /setup again."
-EOF
-    chmod +x "$helper" 2>/dev/null || true
-    echo "$helper"
-}
-
-# ── STEP 1: resolve the token (arg → env var → saved file) ─────────
-echo "STEP 1/3 - Resolving GitHub token..."
-if [ -z "$TOKEN" ] && [ -n "${GITHUB_PERSONAL_ACCESS_TOKEN:-}" ]; then
-    TOKEN="$GITHUB_PERSONAL_ACCESS_TOKEN"
-    echo "  Found GITHUB_PERSONAL_ACCESS_TOKEN in the environment."
-fi
-if [ -z "$TOKEN" ] && [ -f "$TOKEN_FILE" ]; then
-    TOKEN="$(tr -d '\r\n' < "$TOKEN_FILE")"
-    echo "  Found a token saved by a previous setup."
-fi
+echo "  gh found: $(gh --version 2>/dev/null | head -n1)"
 echo ""
 
-# ── STEP 2: validate the token before touching anything ───────────
-echo "STEP 2/3 - Validating token with GitHub..."
-LOGIN=""
-if [ -n "$TOKEN" ]; then
-    RESP="$(curl -fsS \
-        -H "Authorization: token $TOKEN" \
-        -H "User-Agent: cc-cnf-sync" \
-        -H "Accept: application/vnd.github+json" \
-        https://api.github.com/user 2>/dev/null || true)"
-    LOGIN="$(printf '%s' "$RESP" | sed -n 's/.*"login"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+# ── STEP 2: is gh authenticated for github.com? ────────────────────
+echo "STEP 2/4 - Checking GitHub authentication..."
+if ! gh auth status --hostname github.com >/dev/null 2>&1; then
+  echo "  [UNAUTH] Not authenticated (or the stored token is invalid/expired)."
+  echo "UNAUTH"
+  exit 2
 fi
-
+LOGIN=$(gh api user --jq .login 2>/dev/null)
 if [ -z "$LOGIN" ]; then
-    HELPER="$(write_token_helper)"
-    if [ -z "$TOKEN" ]; then
-        echo "  [REQUIRED] No GitHub token found."
-    else
-        echo "  [INVALID] GitHub rejected the token (bad credentials or missing 'repo' scope)."
-    fi
-    echo "  A helper was created at:"
-    echo "    $HELPER"
-    echo "  Run it (bash \"$HELPER\"), paste a VALID token (scope 'repo'), then run /setup again."
-    exit 2
+  echo "  [UNAUTH] Could not read your GitHub account from gh."
+  echo "UNAUTH"
+  exit 2
 fi
-echo "  Token validated - authenticated as @$LOGIN."
+echo "  Authenticated as @$LOGIN."
 echo ""
 
-# ── STEP 3: persist token + (re)install the GitHub MCP ────────────
-echo "STEP 3/3 - Installing GitHub MCP..."
+# ── STEP 3: wire git to authenticate through gh (idempotent) ───────
+# Makes `git push`/`fetch` to github.com use gh's credential — the mechanism the
+# SessionStart/SessionEnd memory-sync hook relies on. Safe to run every time.
+echo "STEP 3/4 - Configuring git to use gh for github.com..."
+gh auth setup-git --hostname github.com >/dev/null 2>&1 || true
+echo "  git credential helper wired to gh."
+echo ""
 
-# Persist so future /setup runs find it without asking again (chmod 600).
-mkdir -p "$TOKEN_DIR"
-printf '%s' "$TOKEN" > "$TOKEN_FILE"
-chmod 600 "$TOKEN_FILE" 2>/dev/null || true
-
-# Record the backup repo URL for the memory-sync hook. The hook authenticates via
-# the OS git credential helper (NOT this token), so it only needs to know *which*
-# repo to push to — this file is its authoritative source (it falls back to the
-# project's origin owner if absent).
-printf '%s' "https://github.com/$LOGIN/claude-code-config.git" > "$TOKEN_DIR/repo"
-
-# Clean any previous (possibly stale) github MCP, then add fresh.
-if claude mcp list 2>&1 | grep -qi "github"; then
-    claude mcp remove github --scope user >/dev/null 2>&1 || true
-    echo "  Removed previous GitHub MCP."
-fi
-
-claude mcp add github npx @modelcontextprotocol/server-github \
-    --env "GITHUB_PERSONAL_ACCESS_TOKEN=$TOKEN" --scope user
-if [ $? -ne 0 ]; then
-    echo "  ERROR: Could not install GitHub MCP."
+# ── STEP 4: ensure the private backup repo exists + record its URL ─
+echo "STEP 4/4 - Ensuring your backup repository exists..."
+if gh repo view "$LOGIN/$REPO_NAME" >/dev/null 2>&1; then
+  echo "  Repository $LOGIN/$REPO_NAME already exists."
+else
+  if gh repo create "$LOGIN/$REPO_NAME" --private --description "$REPO_DESC" >/dev/null 2>&1; then
+    echo "  Created private repository $LOGIN/$REPO_NAME."
+  else
+    echo "  ERROR: could not create $LOGIN/$REPO_NAME (check that your gh token has the 'repo' scope)."
     exit 1
+  fi
 fi
-echo "  GitHub MCP installed successfully."
 
+# Persist the (non-secret) backup URL so the hook and /export/import/status know where to
+# push/pull without an API call. NO token is written — gh owns the credential.
+mkdir -p "$CFG_DIR" 2>/dev/null
+printf '%s' "https://github.com/$LOGIN/$REPO_NAME.git" > "$CFG_DIR/repo"
+echo "  Backup repo URL recorded at $CFG_DIR/repo."
 echo ""
+
 echo "================================================"
 echo "  Setup complete! Connected as @$LOGIN"
 echo "================================================"
-echo ""
-echo "IMPORTANT: restart Claude Code so the MCP reconnects with the new token."
-echo "Then you can use:"
-echo "  /export  - Upload your config to GitHub"
-echo "  /import - Restore your config from GitHub"
-echo "  /status  - Show status and last backup date"
-echo ""
+echo "OK:$LOGIN"
 exit 0
