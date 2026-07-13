@@ -35,10 +35,12 @@ Save it as `<username>` and continue.
 ```bash
 gh repo view "<username>/claude-code-config" >/dev/null 2>&1 \
   && echo EXISTS \
-  || gh repo create "<username>/claude-code-config" --private \
+  || gh repo create "<username>/claude-code-config" --private --add-readme \
        --description "Automated backup and restore of Claude Code configuration files (settings, plugins, commands, skills, agents) synced to a private GitHub repository." \
      && echo CREATED
 ```
+`--add-readme` gives a new repo an initial commit so the clone+push in STEP 5 never trips on an
+unborn branch.
 
 Show:
 ```
@@ -318,7 +320,7 @@ files already in the repo that this backup didn't regenerate (other machines' me
 previous name, etc.) are preserved.
 
 ```bash
-CLONE="${TMPDIR:-/tmp}/cc-cnf-sync-push-$TS"
+CLONE="$TEMP_DIR-clone"   # derived from $TEMP_DIR (which you already have) — no $TS dependency
 gh repo clone "<username>/claude-code-config" "$CLONE" -- --depth 1 \
   || { echo "clone failed — is /setup done and gh authenticated?"; exit 1; }
 
