@@ -1,11 +1,12 @@
 # cc-cnf-sync — Roadmap / proposed changes
 
 Ideas discussed but **not yet implemented**. Current shipped behavior is described in
-[README.md](README.md); this file only tracks what's planned.
+[README.md](README.md); this file only tracks what's planned. (Shipped: **v4.0.x** — auth is via
+the GitHub CLI, no MCP; see the plugin `CLAUDE.md` for architecture.)
 
 ---
 
-## Proposed: inline conflict markers (target: v3.1.0)
+## Proposed: inline conflict markers (target: a future minor)
 
 ### Context
 
@@ -71,7 +72,7 @@ Because the conflict now lives **inside the indexed note that Claude actually re
 - Keep the startup summary message (`"N note(s) have unresolved conflicts — search for
   <<<<<<<"`).
 - Update README.md's "How cross-machine memory works" merge rules accordingly.
-- Bump to v3.1.0.
+- Bump the minor version.
 
 ### Open question
 
@@ -84,6 +85,7 @@ setting, never the default.
 
 ## Other pending items (not plugin code)
 
-- **Regenerate the backup from the PC** with the v3.x plugin so every project (not just
-  AuraDesigns, and a complete Haytale-Legends) is present in the new portable format.
+- **Run `/export` from the Windows PC** (now on the v4.x gh-based plugin) so that machine's
+  projects are added to the backup. The manifest merge is additive, so exporting from any machine
+  only adds/updates its own projects and never prunes the others.
 - `desingsaura` legacy memory: **discarded** (an old version of AuraDesigns; not used).
