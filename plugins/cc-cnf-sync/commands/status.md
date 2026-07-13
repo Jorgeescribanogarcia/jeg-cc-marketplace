@@ -6,8 +6,6 @@ Show current Claude Code configuration status and last backup information.
 
 ### STEP 1 — Gather local information
 
-Run the following commands:
-
 ```bash
 # Claude Code version
 claude --version
@@ -15,21 +13,29 @@ claude --version
 # Installed plugins
 claude plugin list
 
-# MCP servers
-claude mcp list
+# GitHub CLI authentication (this is how cc-cnf-sync authenticates — no MCP)
+gh auth status --hostname github.com 2>&1 | head -5
 ```
 
 ---
 
 ### STEP 2 — Check last backup on GitHub
 
-If the GitHub MCP is available and the session is active:
-- Use the GitHub MCP to read `backup-meta.json` from the `claude-code-config` repository
-- Extract: `backup_date`, `hostname`, `claude_version`
-- Also read `memory-manifest.json` if present, and sum `projects[].files` for a note count
-  (treat as 0 / "—" if the file is absent)
+If `gh` is authenticated, capture the username (`gh api user --jq .login`) and read the backup
+metadata straight from the repo (raw, no clone needed):
 
-If the GitHub MCP is not available or not authenticated:
+```bash
+gh api "repos/<username>/claude-code-config/contents/backup-meta.json" \
+  -H "Accept: application/vnd.github.raw" 2>/dev/null
+gh api "repos/<username>/claude-code-config/contents/memory-manifest.json" \
+  -H "Accept: application/vnd.github.raw" 2>/dev/null
+```
+
+- From `backup-meta.json` extract `backup_date`, `hostname`, `claude_version`.
+- From `memory-manifest.json` sum `projects[].files` for a note count (treat as 0 / "—" if absent).
+- If either call fails because the repo/file doesn't exist yet, treat that value as "Never" / "—".
+
+If `gh` is not installed or not authenticated:
 - Show: `Could not connect to GitHub — run /setup first`
 
 ---
@@ -45,8 +51,8 @@ If the GitHub MCP is not available or not authenticated:
 INSTALLED PLUGINS:
   <list from claude plugin list>
 
-MCP SERVERS:
-  <list from claude mcp list>
+GITHUB AUTH:
+  <@username via gh, or "not signed in — run /setup">
 
 LAST GITHUB BACKUP:
   📅 Date: <backup_date or "Never">
