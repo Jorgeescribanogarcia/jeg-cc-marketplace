@@ -4,65 +4,51 @@ Upload your configuration to GitHub. Works on **Linux, macOS and Windows** (Git 
 
 ## Steps to follow
 
-### STEP 1 — Pre-flight checks
+### STEP 1 — Verify GitHub CLI session
 
-Run this command to check if the GitHub MCP is installed:
+This command uploads via the **GitHub CLI (`gh`) + `git`** — no MCP, no per-file API calls.
+Confirm `gh` is installed and authenticated:
 
 ```bash
-claude mcp list
+gh auth status --hostname github.com 2>&1 | head -5
 ```
 
-Look for any entry containing "github" in the output.
-
-**If GitHub MCP is NOT found**, stop and show:
+**If it is not installed or not authenticated** (non-zero exit / "not logged in" / "token
+invalid"), stop and show:
 ```
-❌ GitHub MCP not found.
+❌ Not signed in to GitHub.
 
-Run /setup first to configure the GitHub MCP,
-then restart Claude Code and run /export again.
+Run /setup first (it installs/authenticates the GitHub CLI),
+then run /export again.
 ```
 
-**If GitHub MCP IS found**, continue to Step 2.
+**If authenticated**, capture the username:
+```bash
+gh api user --jq .login
+```
+Save it as `<username>` and continue.
 
 ---
 
-### STEP 2 — Verify GitHub session
+### STEP 2 — Check or create the backup repository
 
-Call an **authenticated** GitHub MCP endpoint to confirm the session works — e.g.
-`search_repositories` with query `user:@me` (or `get_me` if the server exposes it).
-A merely *present* `github` MCP entry is NOT proof of a working session.
-
-**If the call fails with an authentication error** (e.g. "Bad credentials") or the
-MCP is not installed, stop and show:
+```bash
+gh repo view "<username>/claude-code-config" >/dev/null 2>&1 \
+  && echo EXISTS \
+  || gh repo create "<username>/claude-code-config" --private \
+       --description "Automated backup and restore of Claude Code configuration files (settings, plugins, commands, skills, agents) synced to a private GitHub repository." \
+     && echo CREATED
 ```
-❌ No active GitHub session.
-
-Run /setup to configure your GitHub token,
-then restart Claude Code and run /export again.
-```
-
-**If authenticated**, save the username and continue.
-
----
-
-### STEP 3 — Check or create backup repository
-
-Use the GitHub MCP to check if a repository called `claude-code-config` exists for the authenticated user.
-
-- If it does **NOT exist**: create it as a **private** repository with description:
-  `Automated backup and restore of Claude Code configuration files (settings, plugins, commands, skills, agents) synced to a private GitHub repository.`
-- If it **exists**: continue.
 
 Show:
 ```
-✅ GitHub MCP detected
-✅ Active session as @<username>
+✅ GitHub CLI authenticated as @<username>
 ✅ Repository: github.com/<username>/claude-code-config
 ```
 
 ---
 
-### STEP 4 — Collect configuration files
+### STEP 3 — Collect configuration files
 
 Run the following `bash` to collect all config files into a temp directory. This works
 on Linux, macOS and Windows (Git Bash), where `~/.claude` maps to the right place:
@@ -98,11 +84,11 @@ echo "$TEMP_DIR"
   next step.
 - Session transcripts — `projects/<slug>/*.jsonl` (and any other files directly under a project
   dir). These are large and may contain secrets pasted into the chat. Only each project's
-  `memory/` subfolder is backed up (STEP 4c), never the raw sessions.
+  `memory/` subfolder is backed up (STEP 3c), never the raw sessions.
 
 ---
 
-### STEP 4b — Generate a portable plugin manifest
+### STEP 3b — Generate a portable plugin manifest
 
 Instead of copying the machine-specific plugin JSONs, distill a portable manifest from the
 Claude Code CLI. It records only *what* is installed and *which marketplace* it came from —
@@ -143,7 +129,7 @@ Upload `plugins.json` to the repo root alongside the other files.
 
 ---
 
-### STEP 4c — Collect per-project memory (keyed by a portable, OS-independent identity)
+### STEP 3c — Collect per-project memory (keyed by a portable, OS-independent identity)
 
 Persistent memory is **per project**: it lives at `~/.claude/projects/<slug>/memory/*.md`, where
 `<slug>` is the project's absolute path with separators replaced. That slug is path- and OS-specific
@@ -156,10 +142,16 @@ and **bidirectionally syncs** the memory (pull + merge + push) automatically, so
 full manual snapshot on top of the same layout. Run this `bash` (works on Linux, macOS and Windows via
 Git Bash); the key rules **must stay identical** to `norm_key()` in `hooks/sync-memory.sh`:
 
-> **Before running the script**, download the repo's current `memory-manifest.json` (via the
-> GitHub MCP) to `$TEMP_DIR/prev-manifest.json` if it exists. It lets this backup detect when a
-> project's key changed (e.g. the repo was renamed) and leave a rename alias so old clones keep
-> resolving. If the repo has no manifest yet, skip the download — the script handles its absence.
+> **Before running the script**, fetch the repo's current `memory-manifest.json` to
+> `$TEMP_DIR/prev-manifest.json` if it exists — it lets this backup detect a changed key (e.g.
+> the repo was renamed) and leave a rename alias so old clones keep resolving, and it powers the
+> additive manifest merge:
+>
+> ```bash
+> gh api "repos/<username>/claude-code-config/contents/memory-manifest.json" \
+>   -H "Accept: application/vnd.github.raw" > "$TEMP_DIR/prev-manifest.json" 2>/dev/null \
+>   || rm -f "$TEMP_DIR/prev-manifest.json"   # absent on the first backup — the script handles that
+> ```
 
 ```bash
 SOURCE_PROJECTS="$HOME/.claude/projects"
@@ -296,7 +288,7 @@ project's previous name, and pruning them would break those clones.
 
 ---
 
-### STEP 5 — Add metadata file
+### STEP 4 — Add metadata file
 
 Create a file called `backup-meta.json` in the temp directory. Fill the fields from these
 commands: `claude --version`, `uname -s` (OS, prints "Windows" if it fails), and `hostname`.
@@ -312,40 +304,40 @@ commands: `claude --version`, `uname -s` (OS, prints "Windows" if it fails), and
 
 ---
 
-### STEP 6 — Upload files to GitHub
+### STEP 5 — Upload to GitHub (git clone + commit + push)
 
-**Preferred: upload with `git` (one commit, handles large memory trees).**
-Uploading file-by-file through the GitHub MCP is impractical once memory grows to tens of KB
-across many projects (slow, and each file is a separate API round-trip). If `git` is available
-and authenticated for github.com (the same credential helper the hook uses), push everything in
-one additive commit. This preserves any files already in the repo that this backup didn't
-regenerate (other machines' memory, etc.):
+Upload everything in **one additive commit** via `git` — no per-file API calls, and it scales to
+large memory trees. `gh repo clone` reuses your gh authentication; the copy is **additive**, so
+files already in the repo that this backup didn't regenerate (other machines' memory, a project's
+previous name, etc.) are preserved.
 
 ```bash
 CLONE="${TMPDIR:-/tmp}/cc-cnf-sync-push-$TS"
-REPO_URL="https://github.com/<username>/claude-code-config.git"   # from STEP 2/3
-GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$REPO_URL" "$CLONE" || exit 1
+gh repo clone "<username>/claude-code-config" "$CLONE" -- --depth 1 \
+  || { echo "clone failed — is /setup done and gh authenticated?"; exit 1; }
 
-# Copy the snapshot over the clone (additive: never delete the repo's existing files here).
-# $TEMP_DIR has no .git, so the clone's own .git is left intact.
+# Copy the snapshot over the clone. Additive by construction: $TEMP_DIR has no .git (the clone's
+# own .git stays intact) and existing repo files not present in $TEMP_DIR are left untouched.
 cp -R "$TEMP_DIR"/. "$CLONE"/
 
 cd "$CLONE"
 git add -A
-git -c user.name="cc-cnf-sync" -c user.email="export@$(hostname)" \
-    commit -q -m "backup: $(date +%Y-%m-%d) - Claude Code config sync" || echo "nothing to commit"
-GIT_TERMINAL_PROMPT=0 git push origin HEAD
+if git diff --cached --quiet; then
+  echo "Nothing changed — backup already up to date."
+else
+  git -c user.name="cc-cnf-sync" -c user.email="export@$(hostname)" \
+      commit -q -m "backup: $(date +%Y-%m-%d) - Claude Code config sync"
+  git push origin HEAD && echo "Pushed."
+fi
 ```
 
-**Fallback: GitHub MCP.** If `git` is not available/authenticated, use the GitHub MCP to upload
-each collected file to the `claude-code-config` repository, preserving the directory structure,
-with commit message `backup: <date> - Claude Code config sync`. Show progress as each file is
-uploaded. Either way the upload is **additive** — never delete `memory/` folders the repo already
-has (see STEP 4c).
+`gh repo clone "<user>/repo" DIR -- --depth 1` passes `--depth 1` through to `git clone`; the push
+authenticates through gh (wired by `gh auth setup-git` in /setup). The upload is additive — it
+never deletes `memory/` folders the repo already has (see STEP 3c).
 
 ---
 
-### STEP 7 — Final summary
+### STEP 6 — Final summary
 
 ```
 ✅ Backup completed
