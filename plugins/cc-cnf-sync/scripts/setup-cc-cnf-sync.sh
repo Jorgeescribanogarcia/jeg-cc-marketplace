@@ -84,7 +84,9 @@ echo "STEP 4/4 - Ensuring your backup repository exists..."
 if gh repo view "$LOGIN/$REPO_NAME" >/dev/null 2>&1; then
   echo "  Repository $LOGIN/$REPO_NAME already exists."
 else
-  if gh repo create "$LOGIN/$REPO_NAME" --private --description "$REPO_DESC" >/dev/null 2>&1; then
+  # --add-readme gives the repo an initial commit so it's never empty: the first `git clone`
+  # + push from /export (and the hook) then work cleanly instead of tripping on an unborn branch.
+  if gh repo create "$LOGIN/$REPO_NAME" --private --add-readme --description "$REPO_DESC" >/dev/null 2>&1; then
     echo "  Created private repository $LOGIN/$REPO_NAME."
   else
     echo "  ERROR: could not create $LOGIN/$REPO_NAME (check that your gh token has the 'repo' scope)."
