@@ -34,13 +34,15 @@ Compute THIS project's memory key exactly like the hook (**must stay identical t
 in `hooks/sync-memory.sh`**):
 
 ```bash
+# Input via $nk_arg, NOT $1: Claude Code empties $1/$0/… inside a slash command's bash at
+# runtime, so `k=$1` would become `k=`. Keep this identical to norm_key() in sync-memory.sh.
 norm_key() {
-  k=$1; case "$k" in *.git) k=${k%.git};; esac
+  k=$nk_arg; case "$k" in *.git) k=${k%.git};; esac
   case "$k" in *@*:*) host=${k#*@}; host=${host%%:*}; path=${k#*:}; k="$host/$path";; esac
   k=$(printf '%s' "$k" | sed -E 's#^[a-zA-Z]+://##; s#^[^@/]*@##'); printf '%s' "$k" | tr 'A-Z' 'a-z'
 }
 REMOTE=$(git -C "$PWD" remote get-url origin 2>/dev/null)
-if [ -n "$REMOTE" ]; then KEY=$(norm_key "$REMOTE"); else KEY="local/$(basename "$PWD" | tr 'A-Z' 'a-z')"; fi
+if [ -n "$REMOTE" ]; then nk_arg=$REMOTE; KEY=$(norm_key); else KEY="local/$(basename "$PWD" | tr 'A-Z' 'a-z')"; fi
 SAFE=$(printf '%s' "$KEY" | sed 's/[^a-z0-9._-]/-/g')
 DIR="$CACHE/memory/$SAFE"
 ```
