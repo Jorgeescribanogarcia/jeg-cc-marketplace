@@ -63,9 +63,11 @@ MARKER="$PROJ_DIR/.cc-cnf-sync-checked"
 
 command -v git >/dev/null 2>&1 || { emit_context "cc-cnf-sync: git is not installed; memory not synced. Install git (it also provides the credential helper the sync uses)."; exit 0; }
 
-# ── stable key (MUST match norm_key() in commands/export.md) ────────
+# ── stable key (MUST match norm_key() in commands/export.md and commands/memory.md) ──
+# Reads input from $nk_arg (not $1) so the three copies stay byte-identical: the two command
+# copies MUST avoid $1, which Claude Code empties inside a slash command's bash at runtime.
 norm_key() {
-  k=$1
+  k=$nk_arg
   case "$k" in *.git) k=${k%.git} ;; esac
   case "$k" in *@*:*) host=${k#*@}; host=${host%%:*}; path=${k#*:}; k="$host/$path" ;; esac
   k=$(printf '%s' "$k" | sed -E 's#^[a-zA-Z]+://##; s#^[^@/]*@##')
@@ -74,7 +76,7 @@ norm_key() {
 
 REMOTE=""
 [ -n "$CWD" ] && REMOTE=$(git -C "$CWD" remote get-url origin 2>/dev/null)
-if [ -n "$REMOTE" ]; then KEY=$(norm_key "$REMOTE")
+if [ -n "$REMOTE" ]; then nk_arg=$REMOTE; KEY=$(norm_key)
 elif [ -n "$CWD" ]; then KEY="local/$(basename "$CWD" | tr 'A-Z' 'a-z')"
 else exit 0
 fi
