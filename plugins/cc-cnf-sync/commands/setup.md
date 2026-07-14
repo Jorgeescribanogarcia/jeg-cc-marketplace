@@ -22,10 +22,11 @@ Then execute (capture BOTH the output and the exit code):
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/setup-cc-cnf-sync.sh"
 ```
 
-The script checks that `gh` is installed and authenticated, runs `gh auth setup-git` so plain
-`git` pushes to github.com work, and ensures your private `claude-code-config` repo exists. It
-stores **no token** — only the backup repo URL at `~/.config/cc-cnf-sync/repo`. Branch on its
-exit code:
+The script checks that `gh` is installed — and if it isn't, **installs it automatically** (winget on
+Windows, Homebrew on macOS, the distro package manager on Linux). It then confirms `gh` is
+authenticated, runs `gh auth setup-git` so plain `git` pushes to github.com work, and ensures your
+private `claude-code-config` repo exists. It stores **no token** — only the backup repo URL at
+`~/.config/cc-cnf-sync/repo`. Branch on its exit code:
 
 ---
 
@@ -60,10 +61,14 @@ themselves (they can type it in this session with the leading `!`):
 
 ---
 
-**Exit code 3 — `gh` is NOT installed.** The script printed an `INSTALL_HINT:` line with the
-right command for this OS. Show it and **stop**:
+**Exit code 3 — `gh` is not available.** The script *tried* to install it automatically but couldn't
+(no package manager found, or — on some setups — the new `gh` needs a restart to appear on `PATH`).
+It printed an `INSTALL_HINT:` line with the right command for this OS. Show it and **stop**:
 ```
-⚠️ The GitHub CLI (gh) is not installed. Install it, then run /setup again.
+⚠️ The GitHub CLI (gh) isn't available yet.
+
+If it was just installed, restart Claude Code and run /setup again — it will finish automatically.
+Otherwise install it manually, then run /setup again:
 
   <the INSTALL_HINT command from the script output>
 
