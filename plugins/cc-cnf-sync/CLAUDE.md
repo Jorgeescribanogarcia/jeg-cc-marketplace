@@ -21,6 +21,9 @@ machines/OS via `SessionStart`/`SessionEnd` hooks.
 
 - **No MCP. No token stored by the plugin.** All auth is delegated to **`gh`**. `gh` keeps the
   credential in the OS credential store; `gh auth setup-git` wires `git` to use it.
+- **`/setup` auto-installs `gh` if missing** (v4.1.0): winget (`--scope user`, no UAC) on Windows,
+  `brew` on macOS, non-interactive distro package manager on Linux; exit 3 only if that can't run
+  or a restart is needed for `PATH`.
 - Commands call `gh` (`gh auth status`, `gh repo view/create`, `gh repo clone`, `gh api … Accept: raw`).
 - **The hook has never used the MCP** and still doesn't — it authenticates through git's
   credential helper (which `gh` provides). Nothing changed in the hook for v4.0.

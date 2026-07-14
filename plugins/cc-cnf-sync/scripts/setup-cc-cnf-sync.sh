@@ -31,10 +31,36 @@ echo "  cc-cnf-sync - Setup (GitHub CLI)"
 echo "================================================"
 echo ""
 
-# ── STEP 1: is gh installed? ───────────────────────────────────────
+# ── STEP 1: is gh installed? (auto-install if missing) ─────────────
 echo "STEP 1/4 - Checking for the GitHub CLI (gh)..."
+os=$(uname -s 2>/dev/null || echo unknown)
 if ! command -v gh >/dev/null 2>&1; then
-  os=$(uname -s 2>/dev/null || echo unknown)
+  echo "  gh not found — trying to install it automatically..."
+  case "$os" in
+    *MINGW*|*MSYS*|*CYGWIN*)
+      # user scope avoids a UAC/admin prompt (which would hang a headless run)
+      if command -v winget >/dev/null 2>&1; then
+        winget install --id GitHub.cli -e --source winget --accept-package-agreements --accept-source-agreements --scope user >/dev/null 2>&1 \
+          || winget install --id GitHub.cli -e --source winget --accept-package-agreements --accept-source-agreements >/dev/null 2>&1
+        PATH="$PATH:${LOCALAPPDATA:-$HOME/AppData/Local}/Microsoft/WinGet/Links:/c/Program Files/GitHub CLI"
+      elif command -v choco >/dev/null 2>&1; then
+        choco install gh -y >/dev/null 2>&1; PATH="$PATH:/c/Program Files/GitHub CLI"
+      fi ;;
+    Darwin)
+      command -v brew >/dev/null 2>&1 && brew install gh >/dev/null 2>&1 ;;
+    Linux)
+      # non-interactive sudo only, so a missing/locked password never hangs the run
+      if   command -v apt-get >/dev/null 2>&1; then sudo -n apt-get install -y gh >/dev/null 2>&1
+      elif command -v dnf     >/dev/null 2>&1; then sudo -n dnf install -y gh >/dev/null 2>&1
+      elif command -v pacman  >/dev/null 2>&1; then sudo -n pacman -S --noconfirm github-cli >/dev/null 2>&1
+      elif command -v zypper  >/dev/null 2>&1; then sudo -n zypper --non-interactive install gh >/dev/null 2>&1
+      fi ;;
+  esac
+  export PATH
+  command -v gh >/dev/null 2>&1 && echo "  Installed the GitHub CLI automatically."
+fi
+if ! command -v gh >/dev/null 2>&1; then
+  # auto-install couldn't run (no package manager / needs sudo) or a restart is needed for PATH
   case "$os" in
     Darwin) hint="brew install gh" ;;
     Linux)
@@ -47,7 +73,7 @@ if ! command -v gh >/dev/null 2>&1; then
     *MINGW*|*MSYS*|*CYGWIN*) hint="winget install --id GitHub.cli   (or: scoop install gh)" ;;
     *) hint="see https://github.com/cli/cli#installation" ;;
   esac
-  echo "  [MISSING] gh is not installed."
+  echo "  [MISSING] gh is not available (auto-install failed, or a restart is needed to pick it up)."
   echo "MISSING"
   echo "INSTALL_HINT: $hint"
   exit 3
