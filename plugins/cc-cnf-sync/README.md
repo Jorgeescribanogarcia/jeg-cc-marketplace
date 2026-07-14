@@ -81,8 +81,10 @@ regardless, so nothing is lost either way).
 
 - Claude Code v22+
 - Git Bash on Windows (Claude Code already requires it) — no extra setup on Linux/macOS
-- The **GitHub CLI (`gh`)** — `/setup` uses it to sign in (it requests the `repo` scope). Install
-  from https://github.com/cli/cli#installation if you don't have it.
+- The **GitHub CLI (`gh`)** — `/setup` uses it to sign in (it requests the `repo` scope). You don't
+  need to install it yourself: **`/setup` installs `gh` automatically if it's missing** (winget on
+  Windows, Homebrew on macOS, the distro package manager on Linux). Manual install:
+  https://github.com/cli/cli#installation
 - For the cross-machine memory hook: `git` on `PATH` (on Windows, Git Bash — bundled with Git). It
   authenticates through the same `gh` login `/setup` sets up (`gh auth setup-git`), so there's
   nothing extra to configure. If `git`/auth is missing, the hook simply does nothing; the rest of
@@ -91,8 +93,8 @@ regardless, so nothing is lost either way).
 ## How setup works
 
 `/setup` delegates **all** authentication to the GitHub CLI — this plugin never stores a token.
-It checks that `gh` is installed and authenticated; if not, it points you to a one-line
-`gh auth login` (browser or device-code OAuth). `gh` keeps the credential in your **OS credential
+If `gh` isn't installed it **installs it for you** (winget/Homebrew/distro package manager); then,
+if you're not signed in, it points you to a one-line `gh auth login` (browser or device-code OAuth). `gh` keeps the credential in your **OS credential
 store** (Windows Credential Manager / macOS Keychain / libsecret), and `gh auth setup-git` wires
 `git` to use it — the same mechanism the memory-sync hook relies on. `/setup` then ensures your
 private `claude-code-config` repo exists and records only its (non-secret) URL to
