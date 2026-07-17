@@ -64,6 +64,7 @@ Read `backup-meta.json` from the clone and show, then **wait for confirmation**:
 
 ⚠️  This will overwrite your current configuration at:
     ~/.claude/
+    ~/.agents/skills/   (system agent skills — only if the backup has them)
 
 Continue with restore? (reply: yes / no)
 ```
@@ -79,6 +80,8 @@ Before overwriting anything, back up the current config:
 ```bash
 SAFETY_BACKUP="$HOME/.claude-before-restore-$TS"
 cp -r "$HOME/.claude" "$SAFETY_BACKUP"
+# Also snapshot ~/.agents (system agent skills) if present — the restore may overwrite ~/.agents/skills.
+[ -d "$HOME/.agents" ] && cp -r "$HOME/.agents" "$HOME/.agents-before-restore-$TS"
 echo "Safety backup created at: $SAFETY_BACKUP"
 ```
 
@@ -86,6 +89,7 @@ Show:
 ```
 🛡️  Safety backup created at:
     ~/.claude-before-restore-<timestamp>
+    ~/.agents-before-restore-<timestamp>   (only if ~/.agents existed)
     (in case you need to roll back)
 ```
 
@@ -108,6 +112,14 @@ done
 for d in commands skills agents; do
   [ -d "$CLONE/$d" ] && { mkdir -p "$DEST/$d"; cp -R "$CLONE/$d/." "$DEST/$d/"; echo "restored $d/"; }
 done
+
+# System-level agent skills → ~/.agents/skills (+ the portable install lock). Only if the backup has them.
+if [ -d "$CLONE/agents-skills" ]; then
+  mkdir -p "$HOME/.agents/skills"
+  cp -R "$CLONE/agents-skills/." "$HOME/.agents/skills/"
+  [ -f "$CLONE/agents-skill-lock.json" ] && cp "$CLONE/agents-skill-lock.json" "$HOME/.agents/.skill-lock.json"
+  echo "restored agents-skills/ (→ ~/.agents/skills)"
+fi
 ```
 
 Show progress as each file/dir is restored.

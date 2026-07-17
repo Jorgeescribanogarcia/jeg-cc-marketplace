@@ -29,11 +29,15 @@ gh api "repos/<username>/claude-code-config/contents/backup-meta.json" \
   -H "Accept: application/vnd.github.raw" 2>/dev/null
 gh api "repos/<username>/claude-code-config/contents/memory-manifest.json" \
   -H "Accept: application/vnd.github.raw" 2>/dev/null
+gh api "repos/<username>/claude-code-config/contents/agents-skill-lock.json" \
+  -H "Accept: application/vnd.github.raw" 2>/dev/null
 ```
 
 - From `backup-meta.json` extract `backup_date`, `hostname`, `claude_version`.
 - From `memory-manifest.json` sum `projects[].files` for a note count (treat as 0 / "—" if absent).
-- If either call fails because the repo/file doesn't exist yet, treat that value as "Never" / "—".
+- From `agents-skill-lock.json` count the entries under `skills` for the system agent-skills count
+  (treat as "—" if the file is absent — the backup predates agent-skill sync, or the user has none).
+- If a call fails because the repo/file doesn't exist yet, treat that value as "Never" / "—".
 
 If `gh` is not installed or not authenticated:
 - Show: `Could not connect to GitHub — run /setup first`
@@ -59,6 +63,7 @@ LAST GITHUB BACKUP:
   🖥️  Machine: <hostname or "—">
   🔖 Version: <claude_version or "—">
   🧠 Memory: <k note(s) across n project(s), or "—">
+  🧩 Agent skills: <n skill(s) in ~/.agents, or "—">
   🔗 Repo: https://github.com/<username>/claude-code-config
 
 DAYS SINCE LAST BACKUP: <days or "N/A">
