@@ -283,6 +283,7 @@ union_merge() {
 # others automatically. STRICT ALLOWLIST — nothing else is ever touched. Anything
 # machine-specific belongs in settings.local.json, which is intentionally NOT in the list.
 CFGHOME="${CC_SYNC_CONFIG_HOME:-$HOME/.claude}"     # test seam for offline end-to-end tests
+AGENTS_HOME="${CC_SYNC_AGENTS_HOME:-$HOME/.agents}" # system-level agent skills (skill.sh & co.), test seam
 CFG_BASE="$CFG_DIR/config-base"                     # machine-level 3-way base (relpath -> hash)
 CONFIG_FILES="CLAUDE.md settings.json keybindings.json plugins.json"
 CONFIG_TREES="commands skills agents"
@@ -317,6 +318,11 @@ sync_tree() { # $1=local root  $2=cache root  $3=rel prefix — per-file 3-way o
 sync_config() {
   for f in $CONFIG_FILES; do merge_one "$f" "$CFGHOME/$f" "$CACHE/$f"; done
   for d in $CONFIG_TREES; do sync_tree "$CFGHOME/$d" "$CACHE/$d" "$d"; done
+  # System-level agent skills (skill.sh & co.) live OUTSIDE ~/.claude, at ~/.agents/skills. Mirror
+  # them under the cache namespace `agents-skills/` (+ the portable install lock). Naturally a no-op
+  # when ~/.agents is absent (sync_tree guards on the local dir; merge_one returns if neither side exists).
+  sync_tree "$AGENTS_HOME/skills" "$CACHE/agents-skills" "agents-skills"
+  merge_one "agents-skill-lock.json" "$AGENTS_HOME/.skill-lock.json" "$CACHE/agents-skill-lock.json"
 }
 
 record_config_bases() {  # snapshot the just-synced config hashes as the new 3-way base
@@ -324,6 +330,11 @@ record_config_bases() {  # snapshot the just-synced config hashes as the new 3-w
   { for f in $CONFIG_FILES; do [ -f "$CFGHOME/$f" ] && printf '%s %s\n' "$(hash_note "$CFGHOME/$f")" "$f"; done
     for d in $CONFIG_TREES; do [ -d "$CFGHOME/$d" ] && ( cd "$CFGHOME" && find "$d" -type f ! -name '*.cc-conflict' 2>/dev/null ) | while IFS= read -r rp; do
         printf '%s %s\n' "$(hash_note "$CFGHOME/$rp")" "$rp"; done; done
+    # system-level agent skills (mirrored under `agents-skills/`) + the portable install lock —
+    # same relpath identities merge_one/sync_config use, so the 3-way base lines up.
+    [ -f "$AGENTS_HOME/.skill-lock.json" ] && printf '%s %s\n' "$(hash_note "$AGENTS_HOME/.skill-lock.json")" "agents-skill-lock.json"
+    [ -d "$AGENTS_HOME/skills" ] && ( cd "$AGENTS_HOME/skills" && find . -type f ! -name '*.cc-conflict' 2>/dev/null | sed 's#^\./##' ) | while IFS= read -r rp; do
+        printf '%s %s\n' "$(hash_note "$AGENTS_HOME/skills/$rp")" "agents-skills/$rp"; done
   } > "$CFG_BASE.tmp" 2>/dev/null
   mv "$CFG_BASE.tmp" "$CFG_BASE" 2>/dev/null
 }

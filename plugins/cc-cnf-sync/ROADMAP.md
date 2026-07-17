@@ -2,7 +2,8 @@
 
 Ideas discussed but **not yet implemented**. Current shipped behavior is described in
 [README.md](README.md); this file only tracks what's planned. (Shipped: **v4.0.x** — auth is via
-the GitHub CLI, no MCP; see the plugin `CLAUDE.md` for architecture.)
+the GitHub CLI, no MCP; **v4.2.0** — system-level agent skills in `~/.agents/skills` (skill.sh & co.)
+sync alongside `~/.claude`; see the plugin `CLAUDE.md` for architecture.)
 
 ---
 
