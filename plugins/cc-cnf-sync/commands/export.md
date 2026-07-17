@@ -70,6 +70,15 @@ for d in commands skills agents; do
   [ -d "$SOURCE/$d" ] && cp -r "$SOURCE/$d" "$TEMP_DIR/$d"
 done
 
+# System-level agent skills (skill.sh & co.) live OUTSIDE ~/.claude, at ~/.agents/skills — a
+# cross-tool skills home, distinct from Claude Code's own ~/.claude/skills. Back them up under
+# `agents-skills/` (+ the portable install lock `.skill-lock.json`, which has no absolute paths).
+# Skipped entirely if ~/.agents is absent (users without that ecosystem).
+if [ -d "$HOME/.agents/skills" ]; then
+  cp -r "$HOME/.agents/skills" "$TEMP_DIR/agents-skills"
+  [ -f "$HOME/.agents/.skill-lock.json" ] && cp "$HOME/.agents/.skill-lock.json" "$TEMP_DIR/agents-skill-lock.json"
+fi
+
 echo "$TEMP_DIR"
 ```
 
@@ -362,6 +371,7 @@ Included:
   ✓ commands/ (<n> files)
   ✓ skills/ (<n> files)
   ✓ agents/ (<n> files)
+  ✓ agents-skills/ (<n> files)   ← system agent skills (~/.agents/skills); omit if ~/.agents is absent
   ✓ memory/ (<n> project(s))   ← only if the user opted in; omit this line otherwise
 
 Excluded for security:
