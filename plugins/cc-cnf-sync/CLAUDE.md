@@ -72,6 +72,10 @@ The global-config 3-way bases live in `~/.config/cc-cnf-sync/` (`config-base`), 
 - **Global config** (`sync_config`): strict allowlist — `CLAUDE.md settings.json keybindings.json
   plugins.json` + `commands/ skills/ agents/` trees. `settings.local.json` is intentionally NOT
   synced. Same 3-way logic; conflicts saved as `.cc-conflict` sidecars.
+- **System agent skills** (`sync_config`, same 3-way logic): `~/.agents/skills/` (skill.sh & co., a
+  cross-tool skills home OUTSIDE `~/.claude`) mirrored under the cache namespace `agents-skills/`, plus
+  the portable `~/.agents/.skill-lock.json` → `agents-skill-lock.json`. No-op when `~/.agents` is absent.
+  Recorded in the 3-way base under the same `agents-skills/…` / `agents-skill-lock.json` relpaths.
 - `SessionEnd` runs **detached** (backgrounded) so app teardown can't cancel the push;
   `SessionStart` re-syncs regardless, so nothing is lost either way.
 
@@ -86,6 +90,7 @@ merges the prev manifest (fetched via `gh api … Accept: raw`) — do not regen
 - `CC_SYNC_LOCAL_REMOTE` — use a plain local bare repo as the remote (offline e2e tests).
 - `CC_SYNC_CACHE` — override the cache clone dir (default `~/.claude/cc-cnf-sync/cache/config`).
 - `CC_SYNC_CONFIG_HOME` — override `~/.claude` for the global-config sync.
+- `CC_SYNC_AGENTS_HOME` — override `~/.agents` for the system agent-skills sync.
 - `CC_SYNC_INPUT` / `CC_SYNC_BG` — used by the SessionEnd detach re-invocation.
 
 ## ⚠️ Slash-command `$1`/`$0` substitution (bit us in v3.x → fixed v4.0.1)
