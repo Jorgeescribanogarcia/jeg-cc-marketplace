@@ -23,7 +23,7 @@ recorded with `cwd` == the current working directory. **Read `.jsonl` with `grep
 `sed -n 's/…/p'`** (that aborts in Git Bash).
 
 ```bash
-norm_path() { printf '%s' "$1" | tr '\\' '/' | tr 'A-Z' 'a-z' | sed 's#//*#/#g; s#^\([a-z]\):#/\1#'; }
+norm_path() { printf '%s' "$1" | tr '\134' '/' | tr 'A-Z' 'a-z' | sed 's#//*#/#g; s#^\([a-z]\):#/\1#'; }
 HERE=$(norm_path "$PWD")
 PDIR=""
 for d in "$HOME/.claude/projects"/*/; do
@@ -107,7 +107,7 @@ Iterate every project dir and print a header + `list_dir` for each:
 for d in "$HOME/.claude/projects"/*/; do
   ls "$d"*.jsonl >/dev/null 2>&1 || continue
   name=$(grep -oh '"cwd":"[^"]*"' "$d"*.jsonl 2>/dev/null | head -1 | cut -d'"' -f4)
-  name=$(printf '%s' "$name" | tr '\\' '/' | sed 's#.*/##'); [ -n "$name" ] || name=$(basename "$d")
+  name=$(printf '%s' "$name" | tr '\134' '/' | sed 's#.*/##'); [ -n "$name" ] || name=$(basename "$d")
   echo "── $name ($(du -sh "$d" 2>/dev/null | cut -f1)) ──"
   list_dir "$d"
 done

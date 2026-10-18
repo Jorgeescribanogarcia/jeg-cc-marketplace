@@ -66,8 +66,11 @@ for f in settings.json CLAUDE.md keybindings.json; do
   [ -f "$SOURCE/$f" ] && cp "$SOURCE/$f" "$TEMP_DIR/$f"
 done
 
+# -L: skills are often symlinks into ~/.agents/skills (`hf-cli -> ../../.agents/skills/hf-cli`).
+# Plain `cp -r` tries to recreate the link, which Git Bash can't do without Developer Mode
+# ("cannot create symbolic link") — the skill silently drops out of the backup. Copy its content.
 for d in commands skills agents; do
-  [ -d "$SOURCE/$d" ] && cp -r "$SOURCE/$d" "$TEMP_DIR/$d"
+  [ -d "$SOURCE/$d" ] && cp -rL "$SOURCE/$d" "$TEMP_DIR/$d"
 done
 
 # System-level agent skills (skill.sh & co.) live OUTSIDE ~/.claude, at ~/.agents/skills — a
@@ -215,10 +218,12 @@ if [ -d "$SOURCE_PROJECTS" ]; then
     # `slug/...` and create duplicate memory folders. grep|cut is robust everywhere.
     cwd=$(grep -ho '"cwd"[ ]*:[ ]*"[^"]*"' "$pdir"*.jsonl 2>/dev/null | head -1 | cut -d'"' -f4)
     # Normalize a Windows cwd (JSON-escaped `C:\\Users\\...`) to forward slashes. Plain
-    # `tr '\\' '/'` collapses the escaped `\\` into `//`; squash runs of slashes back to one.
-    cwd=$(printf '%s' "$cwd" | tr '\\' '/' | sed 's#//*#/#g')
+    # `tr '\134' '/'` collapses the escaped `\\` into `//`; squash runs of slashes back to one.
+    # The backslash is written in octal (`\134`): `tr '\\'` works but GNU tr under Git Bash
+    # warns "unescaped backslash at end of string" on every call.
+    cwd=$(printf '%s' "$cwd" | tr '\134' '/' | sed 's#//*#/#g')
 
-    key=""
+    key=""; name=""
     if [ -n "$cwd" ]; then
       remote=$(git -C "$cwd" remote get-url origin 2>/dev/null)
       if [ -n "$remote" ]; then
@@ -226,10 +231,21 @@ if [ -d "$SOURCE_PROJECTS" ]; then
       else
         key="local/$(basename "$cwd" | tr 'A-Z' 'a-z')"
       fi
+      name=$(basename "$cwd")
+    fi
+    # No cwd = this machine kept the project's memory/ but deleted its transcripts, so the
+    # remote can't be read. Reuse the real key a previous backup recorded for this same slug
+    # (slug is stable on one machine) before falling back to `slug/...` — otherwise the
+    # rename-alias below would point the project's good folder at the fallback one.
+    if [ -z "$key" ] && [ -f "$TEMP_DIR/prev-manifest.json" ]; then
+      prevline=$(grep -F "\"slug\": \"$slug\"" "$TEMP_DIR/prev-manifest.json" 2>/dev/null \
+                 | grep -v '"key"[ ]*:[ ]*"slug/' | head -1)
+      key=$(printf '%s' "$prevline" | grep -o '"key"[ ]*:[ ]*"[^"]*"' | head -1 | cut -d'"' -f4)
+      name=$(printf '%s' "$prevline" | grep -o '"name"[ ]*:[ ]*"[^"]*"' | head -1 | cut -d'"' -f4)
     fi
     [ -n "$key" ] || key="slug/$(printf '%s' "$slug" | tr 'A-Z' 'a-z')"   # last resort
     safe=$(printf '%s' "$key" | sed 's/[^a-z0-9._-]/-/g')
-    if [ -n "$cwd" ]; then name=$(basename "$cwd"); else name=$slug; fi
+    [ -n "$name" ] || name=$slug
 
     mkdir -p "$MEM_DEST/$safe"
     cp -r "$mdir/." "$MEM_DEST/$safe/" 2>/dev/null
@@ -242,13 +258,15 @@ if [ -d "$SOURCE_PROJECTS" ]; then
     # `memory/<oldSafeKey>.alias` (one line = the current safeKey) so a clone that still computes
     # the old key keeps resolving to the up-to-date notes. Read by norm_key()'s companion logic
     # in hooks/sync-memory.sh. (grep|cut, not sed -n 's/…/p' — that aborts under Git Bash.)
-    if [ -f "$TEMP_DIR/prev-manifest.json" ]; then
+    # Never alias TOWARD a `slug/...` fallback: that key only means "identity unknown here",
+    # and redirecting a real key to it would hide the project's notes on every other clone.
+    case "$key" in slug/*) ;; *) if [ -f "$TEMP_DIR/prev-manifest.json" ]; then
       prevsafe=$(grep -F "\"slug\": \"$slug\"" "$TEMP_DIR/prev-manifest.json" 2>/dev/null \
                  | grep -o '"safeKey"[ ]*:[ ]*"[^"]*"' | head -1 | cut -d'"' -f4)
       if [ -n "$prevsafe" ] && [ "$prevsafe" != "$safe" ]; then
         printf '%s\n' "$safe" > "$MEM_DEST/$prevsafe.alias"
       fi
-    fi
+    fi ;; esac
 
     printf '    { "slug": "%s", "key": "%s", "safeKey": "%s", "name": "%s", "files": %s }\n' \
       "$slug" "$key" "$safe" "$name" "$fcount" >> "$ENTRIES_FILE"
@@ -343,7 +361,9 @@ previous name, etc.) are preserved.
 
 ```bash
 CLONE="$TEMP_DIR-clone"   # derived from $TEMP_DIR (which you already have) — no $TS dependency
-gh repo clone "<username>/claude-code-config" "$CLONE" -- --depth 1 \
+# core.longpaths: on Windows the temp dir can already be ~150 chars deep, and git's pack
+# files under .git/objects/pack push past MAX_PATH → "Filename too long". Inert elsewhere.
+gh repo clone "<username>/claude-code-config" "$CLONE" -- --depth 1 -c core.longpaths=true \
   || { echo "clone failed — is /setup done and gh authenticated?"; exit 1; }
 
 # Copy the snapshot over the clone. Additive by construction: $TEMP_DIR has no .git (the clone's
