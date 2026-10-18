@@ -7,7 +7,7 @@ sync alongside `~/.claude`; **v4.3.0** — `/sessions`, opt-in VSCode profile sy
 **v4.4.x** — `MEMORY.md` is merged by link target, so the index stops accumulating stale
 duplicates of reworded entries; **v4.5.0** — a note put back by the safety rule is named in the
 session message; **v4.5.1** — `/export` no longer re-keys a project whose transcripts were
-deleted, keeps symlinked skills, and clones with long paths on Windows; see the plugin `CLAUDE.md` for architecture.)
+deleted, keeps symlinked skills, and clones with long paths on Windows.)
 
 ---
 
@@ -85,12 +85,3 @@ Last-write-wins was considered and rejected as a default: it silently discards t
 edit (often an equally-valid addition), and "which is newer" is unreliable across machines
 (git doesn't preserve file mtimes; clocks drift). If ever wanted, it should be an opt-in
 setting, never the default.
-
----
-
-## Other pending items (not plugin code)
-
-- **Run `/export` from the Windows PC** (now on the v4.x gh-based plugin) so that machine's
-  projects are added to the backup. The manifest merge is additive, so exporting from any machine
-  only adds/updates its own projects and never prunes the others.
-- `desingsaura` legacy memory: **discarded** (an old version of AuraDesigns; not used).

@@ -1,2 +1,3 @@
-# Repo CLAUDE.md files (root + per-plugin) are intentionally tracked as agent docs.
-# Add machine-local ignores below.
+# Agent docs stay on the dev machine: this repo is public.
+AGENTS.md
+CLAUDE.md
