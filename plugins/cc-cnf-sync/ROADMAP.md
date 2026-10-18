@@ -6,7 +6,8 @@ the GitHub CLI, no MCP; **v4.2.0** — system-level agent skills in `~/.agents/s
 sync alongside `~/.claude`; **v4.3.0** — `/sessions`, opt-in VSCode profile sync and `/config`;
 **v4.4.x** — `MEMORY.md` is merged by link target, so the index stops accumulating stale
 duplicates of reworded entries; **v4.5.0** — a note put back by the safety rule is named in the
-session message; see the plugin `CLAUDE.md` for architecture.)
+session message; **v4.5.1** — `/export` no longer re-keys a project whose transcripts were
+deleted, keeps symlinked skills, and clones with long paths on Windows; see the plugin `CLAUDE.md` for architecture.)
 
 ---
 

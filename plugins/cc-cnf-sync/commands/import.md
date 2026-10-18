@@ -47,7 +47,8 @@ Clone the whole backup once (everything restores from this local copy):
 ```bash
 TS=$(date +%Y%m%d-%H%M%S)
 CLONE="${TMPDIR:-/tmp}/cc-cnf-sync-restore-$TS"
-gh repo clone "<username>/claude-code-config" "$CLONE" -- --depth 1 \
+# core.longpaths: deep Windows temp dirs push git's pack files past MAX_PATH ("Filename too long").
+gh repo clone "<username>/claude-code-config" "$CLONE" -- --depth 1 -c core.longpaths=true \
   || { echo "clone failed"; exit 1; }
 cat "$CLONE/backup-meta.json" 2>/dev/null || echo "(no backup-meta.json)"
 echo "$CLONE"
