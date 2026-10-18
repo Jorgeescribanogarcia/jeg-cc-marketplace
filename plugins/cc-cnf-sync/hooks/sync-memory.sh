@@ -40,7 +40,7 @@ INPUT=$(cat 2>/dev/null)
 [ -n "$INPUT" ] || exit 0
 
 json_str() { printf '%s' "$INPUT" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" | head -n1; }
-path_conv() { printf '%s' "$1" | sed 's#\\\\#\\#g; s#\\/#/#g' | tr '\\' '/'; }
+path_conv() { printf '%s' "$1" | sed 's#\\\\#\\#g; s#\\/#/#g' | tr '\134' '/'; }
 
 # On SessionEnd the app tears the session down and cancels the still-running hook (the git
 # push takes a few seconds) — that surfaces as "Hook cancelled". Detach the sync so the hook
@@ -122,7 +122,8 @@ ensure_cache() {
   [ -d "$CACHE/.git" ] && return 0            # cache present; fetch/push reuse its origin creds
   resolve_repo || return 1
   mkdir -p "$(dirname "$CACHE")" 2>/dev/null
-  git_auth clone "$URL" "$CACHE" >/dev/null 2>&1
+  # core.longpaths: Windows MAX_PATH — deep skill trees under the cache hit "Filename too long".
+  git_auth clone -c core.longpaths=true "$URL" "$CACHE" >/dev/null 2>&1
 }
 
 if ! ensure_cache; then
