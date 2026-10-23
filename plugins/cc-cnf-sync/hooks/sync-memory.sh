@@ -126,33 +126,66 @@ ensure_cache() {
   git_auth clone -c core.longpaths=true "$URL" "$CACHE" >/dev/null 2>&1
 }
 
+# The cache's working tree holds every file exactly as its blob, LF. With the usual Windows setting
+# core.autocrlf=true, git checked text out as CRLF, so ~2/3 of the files never matched their LF local
+# copy byte for byte and each one went down the slow per-file path. `text=auto eol=lf` in the clone's
+# own info/attributes (never pushed) overrides autocrlf: text is still normalized to LF when added, as
+# autocrlf did, and now checked out as LF too. A cache cloned before this is checked out again once.
+CACHE_ATTRS='* text=auto eol=lf'
+ensure_lf_checkout() {
+  a="$CACHE/.git/info/attributes"
+  grep -qxF "$CACHE_ATTRS" "$a" 2>/dev/null && return 0
+  mkdir -p "$CACHE/.git/info" 2>/dev/null
+  printf '%s\n' "$CACHE_ATTRS" >> "$a"
+  git -C "$CACHE" rm -r -q --cached . >/dev/null 2>&1   # forget the index's stat info so that…
+  git -C "$CACHE" reset -q --hard >/dev/null 2>&1       # …every file is written out again, as LF
+}
+
 # ── one sync at a time ───────────────────────────────────────────────
 # Every project's hook (and every session's, at start and end) shares ONE cache clone. Two syncs at
 # once reset each other's work in it (`reset --hard` between another's merge and push), so the cache
 # is locked for the whole fetch → merge → push. mkdir is atomic on every OS and needs no extra tool.
-# A sync killed by the hook timeout leaves the lock behind; past LOCK_STALE minutes it is broken.
-# If the lock stays busy beyond LOCK_WAIT seconds this run gives up without touching anything: the
+# A sync that is killed (the hook timeout; the app closing kills the SessionEnd sync) skips the trap
+# and leaves the lock behind. The lock holds its owner's PID, so a lock whose process is gone is broken
+# at once; past LOCK_STALE minutes it is broken anyway (no owner written yet, or the OS reused the PID).
+# If a live lock stays busy beyond LOCK_WAIT seconds this run gives up without touching anything: the
 # other sync is doing the same work, and the next session start retries.
 LOCK="$CACHE.lock"
 LOCK_WAIT=${CC_SYNC_LOCK_WAIT:-30}
 LOCK_STALE=${CC_SYNC_LOCK_STALE:-5}
+owner_gone() { # $1 = PID read from the lock. kill -0 only asks whether it exists: every sync runs as
+  # the same user, so it is never refused for lack of permission. An empty or garbled owner is unknown.
+  case "$1" in ''|*[!0-9]*) return 1 ;; esac
+  ! kill -0 "$1" 2>/dev/null
+}
+break_lock() { # $1 = the owner this run judged dead (empty for an aged lock)
+  # Rename before removing: only one waiter wins the rename of a given directory. If the owner inside is
+  # no longer the one judged dead, another waiter re-took the lock in between, so it is put back.
+  mv "$LOCK" "$LOCK.$$" 2>/dev/null || return 0
+  if [ "$(cat "$LOCK.$$/owner" 2>/dev/null)" = "$1" ]; then rm -rf "$LOCK.$$" 2>/dev/null
+  else mv "$LOCK.$$" "$LOCK" 2>/dev/null; return 1; fi
+}
 acquire_lock() {
   mkdir -p "$(dirname "$CACHE")" 2>/dev/null
   waited=0
   while ! mkdir "$LOCK" 2>/dev/null; do
-    if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +"$LOCK_STALE" 2>/dev/null)" ]; then
-      rm -rf "$LOCK" 2>/dev/null; continue
+    o=$(cat "$LOCK/owner" 2>/dev/null)
+    if owner_gone "$o" || [ -n "$(find "$LOCK" -maxdepth 0 -mmin +"$LOCK_STALE" 2>/dev/null)" ]; then
+      break_lock "$o" && continue
     fi
     [ "$waited" -ge "$LOCK_WAIT" ] && return 1
     sleep 1; waited=$((waited + 1))
   done
   trap 'rm -rf "$LOCK" 2>/dev/null' EXIT INT TERM HUP
+  printf '%s\n' "$$" > "$LOCK/owner"
   return 0
 }
 if ! acquire_lock; then
   emit_context "cc-cnf-sync: another sync is still running (lock $LOCK); this session's memory was left untouched and will sync next time."
   exit 0
 fi
+WORK="$LOCK/work"                     # scratch files; inside the lock, so they go away with it
+mkdir -p "$WORK" 2>/dev/null
 
 if ! ensure_cache; then
   : > "$MARKER"
@@ -163,6 +196,7 @@ if ! ensure_cache; then
   fi
   exit 0
 fi
+ensure_lf_checkout
 
 BR=$(git -C "$CACHE" symbolic-ref --short HEAD 2>/dev/null); [ -n "$BR" ] || BR=main
 MACHINE=$(hostname 2>/dev/null | sed 's/[^A-Za-z0-9._-]/-/g'); [ -n "$MACHINE" ] || MACHINE=unknown
@@ -418,11 +452,75 @@ merge_one() {
   else cp "$cf" "$lf.cc-conflict" 2>/dev/null; cp "$cf" "$cf.cc-conflict" 2>/dev/null; cp "$lf" "$cf" 2>/dev/null; fi
 }
 
+tree_files() { [ -d "$1" ] && ( cd "$1" && find . -type f ! -name '*.cc-conflict' 2>/dev/null | sed 's#^\./##' ); }
+
+# Raw blob hash of every file under $1, written to $2 as "<hash> <relpath>", with ONE git process for
+# the whole tree. Spawning processes per file (cmp, tr, git) is what made a sync take minutes: ~100 ms a
+# process in Git Bash, over ~1,200 skill files, so the hook timeout cut it short. --no-filters hashes the
+# bytes as they are; with a path, git would otherwise apply autocrlf and the .gitattributes. It runs
+# against an empty repo of its own: inside a repo (the cache is one) git reads --stdin-paths relative
+# to that repo's top, not to the current directory, and would also pick up its config. Returns 1 if any
+# file failed to hash (one vanished mid-run…): the hashes would no longer line up with the paths, so
+# the caller falls back to going file by file.
+tree_hashes() {
+  : > "$2"
+  [ -d "$1" ] || return 0
+  [ -d "$WORK/none.git" ] || git init -q --bare "$WORK/none.git" >/dev/null 2>&1 || return 1
+  tree_files "$1" > "$WORK/paths"
+  ( cd "$1" && git --git-dir="$WORK/none.git" --work-tree=. -c core.longpaths=true \
+      hash-object --no-filters --stdin-paths ) < "$WORK/paths" > "$WORK/hashes" 2>/dev/null || return 1
+  [ "$(wc -l < "$WORK/paths")" -eq "$(wc -l < "$WORK/hashes")" ] || return 1
+  paste -d ' ' "$WORK/hashes" "$WORK/paths" > "$2"
+}
+
+# The CR-stripped hash (what hash_note gives, the identity the 3-way base stores) of every file under
+# $1, written to $2 as "<hash> <relpath>". For a file without a CR it IS the raw hash. For one with a CR
+# (a sixth of the skills on Windows) it comes from CRLF_MEMO, "<raw hash> <CR-stripped hash>": the
+# stripped hash depends only on the content, which the raw hash identifies, so an entry can never go
+# stale. A miss is computed once per new content and appended at once, so even a sync cut short keeps
+# what it did; record_config_bases() later prunes the memo to the entries this run used. -U: Git Bash's
+# grep reads in text mode and drops the CR of every CRLF without it; a grep that still misses the CR of
+# a known sample can't be trusted to list the files, so then every file is looked up in the memo.
+CRLF_MEMO="$CFG_DIR/crlf-hashes"
+norm_hashes() {
+  tree_hashes "$1" "$WORK/raw" || return 1
+  : > "$2"
+  [ -s "$WORK/raw" ] || return 0
+  mkdir -p "$CFG_DIR" 2>/dev/null; [ -f "$CRLF_MEMO" ] || : > "$CRLF_MEMO"
+  cr_char=$(printf '\r'); all=1
+  printf 'x\r\n' | grep -qU "$cr_char" 2>/dev/null && all=0
+  ( cd "$1" && find . -type f ! -name '*.cc-conflict' -exec grep -lU "$cr_char" {} + 2>/dev/null | sed 's#^\./##' ) > "$WORK/cr"
+  awk -v ALL="$all" -v USED="$WORK/memo.used" '
+    FILENAME == ARGV[1] { m[$1] = $2; next }
+    FILENAME == ARGV[2] { cr[$0] = 1; next }
+    { h = $1; p = substr($0, length($1) + 2)
+      if (!ALL && !(p in cr)) print h " " p
+      else if (h in m) { print m[h] " " p; print h " " m[h] >> USED }
+      else print "? " h " " p }' "$CRLF_MEMO" "$WORK/cr" "$WORK/raw" > "$WORK/norm" || return 1
+  while IFS= read -r ln; do
+    case "$ln" in
+      '? '*) ln=${ln#\? }; h=${ln%% *}; p=${ln#* }
+             n=$(hash_note "$1/$p"); [ -n "$n" ] || return 1
+             printf '%s %s\n' "$h" "$n" >> "$CRLF_MEMO"; printf '%s %s\n' "$h" "$n" >> "$WORK/memo.used"
+             printf '%s %s\n' "$n" "$p" ;;
+      *) printf '%s\n' "$ln" ;;
+    esac
+  done < "$WORK/norm" > "$2"
+}
+
 sync_tree() { # $1=local root  $2=cache root  $3=rel prefix — per-file 3-way over a directory
   lr=$1; cr=$2; pfx=$3
-  { [ -d "$lr" ] && ( cd "$lr" && find . -type f ! -name '*.cc-conflict' 2>/dev/null | sed 's#^\./##' )
-    [ -d "$cr" ] && ( cd "$cr" && find . -type f ! -name '*.cc-conflict' 2>/dev/null | sed 's#^\./##' ); } \
-  | sort -u | while IFS= read -r rp; do
+  if norm_hashes "$lr" "$WORK/l" && norm_hashes "$cr" "$WORK/c"; then
+    # The same note on both sides (CRLF aside: equal stripped hashes are what notes_differ calls equal)
+    # is nearly every file and needs nothing; only the rest (one side only, or edited) reaches merge_one.
+    awk 'FILENAME == ARGV[1] { c[substr($0, length($1) + 2)] = $1; next }   # not NR == FNR: the first list may be empty
+         { p = substr($0, length($1) + 2)
+           if (p in c) { same = (c[p] == $1); delete c[p]; if (same) next }
+           print p }
+         END { for (p in c) print p }' "$WORK/c" "$WORK/l"
+  else
+    { tree_files "$lr"; tree_files "$cr"; } | sort -u
+  fi | while IFS= read -r rp; do
       [ -n "$rp" ] || continue
       merge_one "$pfx/$rp" "$lr/$rp" "$cr/$rp"
     done
@@ -458,25 +556,43 @@ agreed_base() { # $1 = rel identity, $2 = local file, $3 = cache file — the ba
   fi
 }
 
+tree_bases() { # $1=local root  $2=cache root  $3=rel prefix — the base line of every local file under $1
+  [ -d "$1" ] || return 0
+  if norm_hashes "$1" "$WORK/l" && norm_hashes "$2" "$WORK/c"; then
+    # agreed_base() for the whole tree in one pass: the stripped hash where both sides hold the same
+    # note, else the previous base line, if there was one.
+    { [ -f "$CFG_BASE" ] && cat "$CFG_BASE"; } > "$WORK/base" 2>/dev/null
+    awk -v P="$3/" 'FILENAME == ARGV[1] { b[substr($0, length($1) + 2)] = $1; next }
+         FILENAME == ARGV[2] { c[substr($0, length($1) + 2)] = $1; next }
+         { p = substr($0, length($1) + 2)
+           if ((p in c) && c[p] == $1) print $1 " " P p
+           else if ((P p) in b) print b[P p] " " P p }' "$WORK/base" "$WORK/c" "$WORK/l"
+  else
+    tree_files "$1" | while IFS= read -r rp; do agreed_base "$3/$rp" "$1/$rp" "$2/$rp"; done
+  fi
+}
+
 record_config_bases() {  # snapshot the just-synced config hashes as the new 3-way base
   mkdir -p "$CFG_DIR" 2>/dev/null
   { for f in $CONFIG_FILES; do [ -f "$CFGHOME/$f" ] && agreed_base "$f" "$CFGHOME/$f" "$CACHE/$f"; done
-    for d in $CONFIG_TREES; do [ -d "$CFGHOME/$d" ] && ( cd "$CFGHOME" && find "$d" -type f ! -name '*.cc-conflict' 2>/dev/null ) | while IFS= read -r rp; do
-        agreed_base "$rp" "$CFGHOME/$rp" "$CACHE/$rp"; done; done
+    for d in $CONFIG_TREES; do tree_bases "$CFGHOME/$d" "$CACHE/$d" "$d"; done
     # system-level agent skills (mirrored under `agents-skills/`) + the portable install lock —
     # same relpath identities merge_one/sync_config use, so the 3-way base lines up.
     [ -f "$AGENTS_HOME/.skill-lock.json" ] && agreed_base "agents-skill-lock.json" "$AGENTS_HOME/.skill-lock.json" "$CACHE/agents-skill-lock.json"
-    [ -d "$AGENTS_HOME/skills" ] && ( cd "$AGENTS_HOME/skills" && find . -type f ! -name '*.cc-conflict' 2>/dev/null | sed 's#^\./##' ) | while IFS= read -r rp; do
-        agreed_base "agents-skills/$rp" "$AGENTS_HOME/skills/$rp" "$CACHE/agents-skills/$rp"; done
+    tree_bases "$AGENTS_HOME/skills" "$CACHE/agents-skills" "agents-skills"
     # VSCode profile (only when opted in) — same relpaths sync_config uses.
     if vscode_enabled && [ -n "$VSCODE_USER" ]; then
       for f in $VSCODE_FILES; do [ -f "$VSCODE_USER/$f" ] && agreed_base "vscode/$f" "$VSCODE_USER/$f" "$CACHE/vscode/$f"; done
-      [ -d "$VSCODE_USER/snippets" ] && ( cd "$VSCODE_USER/snippets" && find . -type f ! -name '*.cc-conflict' 2>/dev/null | sed 's#^\./##' ) | while IFS= read -r rp; do
-          agreed_base "vscode/snippets/$rp" "$VSCODE_USER/snippets/$rp" "$CACHE/vscode/snippets/$rp"; done
+      tree_bases "$VSCODE_USER/snippets" "$CACHE/vscode/snippets" "vscode/snippets"
       [ -f "$CFG_DIR/vscode-extensions.txt" ] && agreed_base "vscode/extensions.txt" "$CFG_DIR/vscode-extensions.txt" "$CACHE/vscode/extensions.txt"
     fi
   } > "$CFG_BASE.tmp" 2>/dev/null
   mv "$CFG_BASE.tmp" "$CFG_BASE" 2>/dev/null
+  # Keep only the memo entries this run looked up or added: the contents that left both sides go.
+  if [ -f "$CRLF_MEMO" ]; then
+    { [ -f "$WORK/memo.used" ] && sort -u "$WORK/memo.used"; } > "$CRLF_MEMO.tmp" 2>/dev/null
+    mv "$CRLF_MEMO.tmp" "$CRLF_MEMO" 2>/dev/null
+  fi
 }
 
 # ── sync loop (retry on push race) ─────────────────────────────────

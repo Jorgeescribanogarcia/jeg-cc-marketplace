@@ -85,4 +85,60 @@ touch -d '20 minutes ago' "$T/cache.lock"
 CC_SYNC_LOCK_WAIT=2 run_sync >/dev/null
 check "a stale lock is broken" '[ "$(on_remote $KEYDIR/a.md)" = "v1" ]'
 
+# 5. A lock whose owner process is gone is broken at once, however young: the app kills the SessionEnd
+# sync on exit, the KILL skips the trap that removes the lock, and the next session used to wait it out.
+setup
+printf 'v1\n' > "$MEM/a.md"
+mkdir "$T/cache.lock"
+sh -c 'echo $$' > "$T/cache.lock/owner"        # a PID that has already exited
+out=$(CC_SYNC_LOCK_WAIT=2 run_sync)
+check "a lock left by a dead process is broken" '[ "$(on_remote $KEYDIR/a.md)" = "v1" ]'
+check "…without telling the session another sync is running" '! printf "%s" "$out" | grep -q "another sync"'
+setup
+printf 'v1\n' > "$MEM/a.md"
+mkdir "$T/cache.lock"
+sleep 30 & live=$!
+echo "$live" > "$T/cache.lock/owner"
+CC_SYNC_LOCK_WAIT=2 run_sync >/dev/null
+check "a lock whose owner is alive is respected" '[ -z "$(on_remote $KEYDIR/a.md)" ]'
+kill "$live" 2>/dev/null
+
+# 6. Config trees are compared in bulk; the per-file results must be what the file-by-file code gave.
+setup
+mkdir -p "$T/cfg/skills/s" "$T/agents/skills/k"
+printf 'same\n' > "$T/cfg/skills/s/same.md"
+printf 'crlf\r\nline\r\n' > "$T/cfg/skills/s/crlf.md"
+printf 'name with spaces\n' > "$T/cfg/skills/s/has space.md"
+printf 'agent skill\n' > "$T/agents/skills/k/SKILL.md"
+printf 'n\n' > "$MEM/a.md"
+run_sync >/dev/null
+check "a tree new to the backup is not mistaken for the backup's copy" '[ -n "$(on_remote skills/s/same.md)" ] && [ "$(cat "$T/cfg/skills/s/same.md")" = "same" ]'
+check "tree files reach the backup" '[ "$(on_remote "skills/s/has space.md")" = "name with spaces" ] && [ -n "$(on_remote agents-skills/k/SKILL.md)" ]'
+norm() { tr -d '\r' < "$1" | git hash-object --stdin; }
+check "base of a CRLF file is its CR-stripped hash" 'grep -qxF "$(norm "$T/cfg/skills/s/crlf.md") skills/s/crlf.md" "$T/xdg/cc-cnf-sync/config-base"'
+check "base of a plain file is its hash" 'grep -qxF "$(norm "$T/cfg/skills/s/same.md") skills/s/same.md" "$T/xdg/cc-cnf-sync/config-base"'
+check "base of a file with spaces in its name" 'grep -qxF "$(norm "$T/cfg/skills/s/has space.md") skills/s/has space.md" "$T/xdg/cc-cnf-sync/config-base"'
+printf 'edited here\n' > "$T/cfg/skills/s/same.md"
+git clone -q "$T/remote.git" "$T/other" && printf 'edited there\n' > "$T/other/agents-skills/k/SKILL.md" &&
+  git -C "$T/other" -c user.name=t -c user.email=t@t commit -qam other && git -C "$T/other" push -q origin HEAD:main
+run_sync >/dev/null
+check "a one-sided local edit in a tree is pushed" '[ "$(on_remote skills/s/same.md)" = "edited here" ]'
+check "a one-sided backup edit in a tree is pulled" '[ "$(cat "$T/agents/skills/k/SKILL.md")" = "edited there" ]'
+check "the cache checks text out as LF even with core.autocrlf=true" 'rm -f "$T/cache/agents-skills/k/SKILL.md" && git -c core.autocrlf=true -C "$T/cache" checkout -q -- agents-skills/k/SKILL.md && ! grep -qU "$(printf "\r")" "$T/cache/agents-skills/k/SKILL.md"'
+check "neither leaves a conflict copy" '[ -z "$(find "$T/cfg" "$T/agents" -name "*.cc-conflict")" ]'
+printf 'mine\n' > "$T/cfg/skills/s/same.md"
+git -C "$T/other" pull -q && printf 'theirs\n' > "$T/other/skills/s/same.md" &&
+  git -C "$T/other" -c user.name=t -c user.email=t@t commit -qam both && git -C "$T/other" push -q origin HEAD:main
+run_sync >/dev/null
+check "an edit on both sides keeps both" '[ "$(cat "$T/cfg/skills/s/same.md")" = "mine" ] && [ "$(cat "$T/cfg/skills/s/same.md.cc-conflict")" = "theirs" ]'
+
+# 7. Speed: a steady-state sync over many unchanged files must not cost a process per file.
+setup
+for s in $(seq 1 40); do mkdir -p "$T/cfg/skills/s$s"; for f in $(seq 1 15); do printf '%s %s\n' "$s" "$f" > "$T/cfg/skills/s$s/f$f.md"; done; done
+printf 'n\n' > "$MEM/a.md"
+run_sync >/dev/null
+t0=$(date +%s); run_sync >/dev/null; t1=$(date +%s)
+echo "     steady-state sync over 600 files: $((t1 - t0)) s"
+check "a steady-state sync over 600 files takes under 15 s" '[ $((t1 - t0)) -lt 15 ]'
+
 [ "$FAILED" = 0 ] && echo "all tests passed" || { echo "some tests FAILED"; exit 1; }
