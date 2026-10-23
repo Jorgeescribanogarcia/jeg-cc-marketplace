@@ -11,7 +11,10 @@ deleted, keeps symlinked skills, and clones with long paths on Windows; **v4.5.2
 reached the backup is no longer recorded as the base (a stale backup could overwrite newer local notes
 and config), and syncs are serialized with a lock on the shared cache; **v4.5.3** — a steady-state sync
 takes seconds instead of minutes (config trees are hashed in bulk, CRLF files through a memo, and the
-cache checks text out as LF), and a lock whose owner process is gone is broken at once.)
+cache checks text out as LF), and a lock whose owner process is gone is broken at once; **v4.6.0** —
+`/sessions clean older <days>` and
+`larger <MB>`, sizes and deletions include each session's subagent folder, and the active session is never
+deleted.)
 
 ---
 

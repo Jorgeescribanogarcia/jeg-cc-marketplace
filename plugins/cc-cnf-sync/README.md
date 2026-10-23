@@ -149,7 +149,7 @@ mid-flight push (and `SessionStart` re-syncs regardless, so nothing is lost eith
 | `/import` | Restore your configuration from GitHub (e.g. on a new machine) |
 | `/status` | Show local status and last-backup info |
 | `/memory` | List / view / delete synced memory notes without opening GitHub |
-| `/sessions` | Manage a project's chat sessions — list / delete / clean / rename (also `all` projects) |
+| `/sessions` | Manage a project's chat sessions — list / delete / clean (keep N, `older <days>`, `larger <MB>`; never the active session) / rename (also `all` projects) |
 | `/config` | Plugin options — e.g. turn on the opt-in **VSCode profile sync** |
 | `/uninstall` | Remove the plugin's local files (your backup and `gh` login stay intact) |
 
