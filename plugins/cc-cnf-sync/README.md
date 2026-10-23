@@ -81,8 +81,17 @@ that failed, or another sync that reset the shared cache first — therefore can
 agreement, and the next sync still treats the local edit as the newer one instead of pulling the stale
 backup over it. Syncs are also serialized: every project and session shares one cache clone, so a sync
 takes a lock on it for the whole fetch → merge → push. A sync that finds the lock busy for more than
-30 seconds leaves everything untouched and says so; a lock older than 5 minutes (left by a sync killed by
-the hook timeout) is broken.
+30 seconds leaves everything untouched and says so. The lock records its owner's PID, so a lock left by a
+sync that was killed (the hook timeout, or Claude Code closing during the `SessionEnd` sync) is broken as
+soon as that process is gone; a lock older than 5 minutes is broken regardless.
+
+**Speed.** Config trees (`skills/`, `~/.agents/skills`, …) hold over a thousand files, so they are
+compared in bulk: one `git hash-object --stdin-paths` per tree, and only files that differ go through the
+per-file 3-way merge. Files with CRLF line endings are compared by their CR-stripped hash, looked up in a
+per-machine memo (`~/.config/cc-cnf-sync/crlf-hashes`, raw hash → stripped hash), so each new content is
+stripped once. The cache clone checks text out as LF (`* text=auto eol=lf` in its `.git/info/attributes`)
+whatever `core.autocrlf` says, so it matches local LF files byte for byte. A sync with nothing to change
+takes seconds, not minutes.
 
 **Deletions are treated by kind.** A plain `rm` of a **real note** does **not** propagate — it reappears
 from the other machine, so an accidental delete is never silently mirrored everywhere — and the note is
@@ -214,7 +223,8 @@ completely untouched, so reinstalling + `/import` brings everything back.
 
 `plugins/cc-cnf-sync/tests/sync-memory.test.sh` runs the hook end to end against a local bare repository
 (no network, no real config): a lost push must not revert a note or `CLAUDE.md`, a busy lock stops a sync
-without side effects, and a stale lock is broken. Run it with `sh plugins/cc-cnf-sync/tests/sync-memory.test.sh`.
+without side effects, a stale lock or one whose owner process is gone is broken, config trees merge
+file by file as before (CRLF files included), and a steady-state sync over 600 files stays fast. Run it with `sh plugins/cc-cnf-sync/tests/sync-memory.test.sh`.
 
 ## Requirements
 

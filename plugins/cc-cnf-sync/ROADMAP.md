@@ -9,7 +9,9 @@ duplicates of reworded entries; **v4.5.0** — a note put back by the safety rul
 session message; **v4.5.1** — `/export` no longer re-keys a project whose transcripts were
 deleted, keeps symlinked skills, and clones with long paths on Windows; **v4.5.2** — a merge that never
 reached the backup is no longer recorded as the base (a stale backup could overwrite newer local notes
-and config), and syncs are serialized with a lock on the shared cache.)
+and config), and syncs are serialized with a lock on the shared cache; **v4.5.3** — a steady-state sync
+takes seconds instead of minutes (config trees are hashed in bulk, CRLF files through a memo, and the
+cache checks text out as LF), and a lock whose owner process is gone is broken at once.)
 
 ---
 
