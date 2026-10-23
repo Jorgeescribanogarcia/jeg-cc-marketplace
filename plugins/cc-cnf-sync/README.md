@@ -75,6 +75,15 @@ when **both** sides changed the same note since the last sync are both copies ke
 index) is merged line by line, keyed by the note each line links to — so rewording an entry updates
 it in place instead of leaving the old line behind, and an entry you delete stays deleted.
 
+**The base is what both sides agreed on.** After a sync, a note (or config file) becomes the new base
+only if the local copy and the backup copy are identical. A merge that never reached the backup — a push
+that failed, or another sync that reset the shared cache first — therefore cannot be mistaken for an
+agreement, and the next sync still treats the local edit as the newer one instead of pulling the stale
+backup over it. Syncs are also serialized: every project and session shares one cache clone, so a sync
+takes a lock on it for the whole fetch → merge → push. A sync that finds the lock busy for more than
+30 seconds leaves everything untouched and says so; a lock older than 5 minutes (left by a sync killed by
+the hook timeout) is broken.
+
 **Deletions are treated by kind.** A plain `rm` of a **real note** does **not** propagate — it reappears
 from the other machine, so an accidental delete is never silently mirrored everywhere — and the note is
 **named in the session message** along with the command that removes it for good, so a deletion that keeps
@@ -200,6 +209,12 @@ per-machine hook state). Your **GitHub backup** (`claude-code-config`) and your 
 completely untouched, so reinstalling + `/import` brings everything back.
 
 ---
+
+## Tests
+
+`plugins/cc-cnf-sync/tests/sync-memory.test.sh` runs the hook end to end against a local bare repository
+(no network, no real config): a lost push must not revert a note or `CLAUDE.md`, a busy lock stops a sync
+without side effects, and a stale lock is broken. Run it with `sh plugins/cc-cnf-sync/tests/sync-memory.test.sh`.
 
 ## Requirements
 
