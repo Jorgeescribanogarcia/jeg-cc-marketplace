@@ -7,7 +7,9 @@ sync alongside `~/.claude`; **v4.3.0** — `/sessions`, opt-in VSCode profile sy
 **v4.4.x** — `MEMORY.md` is merged by link target, so the index stops accumulating stale
 duplicates of reworded entries; **v4.5.0** — a note put back by the safety rule is named in the
 session message; **v4.5.1** — `/export` no longer re-keys a project whose transcripts were
-deleted, keeps symlinked skills, and clones with long paths on Windows.)
+deleted, keeps symlinked skills, and clones with long paths on Windows; **v4.5.2** — a merge that never
+reached the backup is no longer recorded as the base (a stale backup could overwrite newer local notes
+and config), and syncs are serialized with a lock on the shared cache.)
 
 ---
 

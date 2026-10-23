@@ -126,6 +126,34 @@ ensure_cache() {
   git_auth clone -c core.longpaths=true "$URL" "$CACHE" >/dev/null 2>&1
 }
 
+# ── one sync at a time ───────────────────────────────────────────────
+# Every project's hook (and every session's, at start and end) shares ONE cache clone. Two syncs at
+# once reset each other's work in it (`reset --hard` between another's merge and push), so the cache
+# is locked for the whole fetch → merge → push. mkdir is atomic on every OS and needs no extra tool.
+# A sync killed by the hook timeout leaves the lock behind; past LOCK_STALE minutes it is broken.
+# If the lock stays busy beyond LOCK_WAIT seconds this run gives up without touching anything: the
+# other sync is doing the same work, and the next session start retries.
+LOCK="$CACHE.lock"
+LOCK_WAIT=${CC_SYNC_LOCK_WAIT:-30}
+LOCK_STALE=${CC_SYNC_LOCK_STALE:-5}
+acquire_lock() {
+  mkdir -p "$(dirname "$CACHE")" 2>/dev/null
+  waited=0
+  while ! mkdir "$LOCK" 2>/dev/null; do
+    if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +"$LOCK_STALE" 2>/dev/null)" ]; then
+      rm -rf "$LOCK" 2>/dev/null; continue
+    fi
+    [ "$waited" -ge "$LOCK_WAIT" ] && return 1
+    sleep 1; waited=$((waited + 1))
+  done
+  trap 'rm -rf "$LOCK" 2>/dev/null' EXIT INT TERM HUP
+  return 0
+}
+if ! acquire_lock; then
+  emit_context "cc-cnf-sync: another sync is still running (lock $LOCK); this session's memory was left untouched and will sync next time."
+  exit 0
+fi
+
 if ! ensure_cache; then
   : > "$MARKER"
   if [ -z "$URL" ]; then
@@ -174,17 +202,29 @@ state_del() { [ -f "$STATE" ] || return 0; grep -vxF "$1" "$STATE" 2>/dev/null >
 # per-machine (never synced) and refreshed only after a successful sync (record_bases).
 hash_note() { tr -d '\r' < "$1" 2>/dev/null | git hash-object --stdin 2>/dev/null; }
 base_get()  { [ -f "$BASEFILE" ] && awk -v n="$1" '$2==n{print $1; exit}' "$BASEFILE" 2>/dev/null; }
-record_bases() { # $1 = local memory dir — snapshot every note's hash as the new base
+record_bases() { # $1 = local memory dir, $2 = this project's dir in the cache (= the backup after the sync)
+  # The base means "both sides held this when we last agreed", so a note is recorded only when the
+  # local copy and the backup copy are the same. Recording the local copy blindly turned a merge that
+  # never reached the backup (a concurrent sync reset the shared cache before our push) into a false
+  # agreement: the next sync saw "local == base, backup differs" and pulled the stale backup over the
+  # newer local note. A note the two sides disagree on keeps its previous base.
   bf="$1/.cc-cnf-sync-base"
   { for f in "$1"/*.md; do [ -e "$f" ] || continue
       b=$(basename "$f"); case "$b" in *.conflict.md) continue ;; esac
-      printf '%s %s\n' "$(hash_note "$f")" "$b"
+      if [ -e "$2/$b" ] && ! notes_differ "$f" "$2/$b"; then
+        printf '%s %s\n' "$(hash_note "$f")" "$b"
+      else
+        old=$(base_get "$b"); [ -n "$old" ] && printf '%s %s\n' "$old" "$b"
+      fi
     done; } > "$bf.tmp" 2>/dev/null
   mv "$bf.tmp" "$bf" 2>/dev/null
   # …and a full COPY of the index, because MEMORY.md is merged line by line: a
   # content hash only answers "did it change", and the line merge needs to know
   # WHICH entries existed at the last sync to tell a deletion from a new arrival.
-  cp "$1/MEMORY.md" "$1/.cc-cnf-sync-memory-base" 2>/dev/null
+  # Same rule: only an index the backup also holds becomes the base.
+  if [ -e "$2/MEMORY.md" ] && ! notes_differ "$1/MEMORY.md" "$2/MEMORY.md"; then
+    cp "$1/MEMORY.md" "$1/.cc-cnf-sync-memory-base" 2>/dev/null
+  fi
 }
 
 # ── file-level union merge of $1 (remote/cache dir) and $2 (local dir) ─
@@ -409,22 +449,31 @@ sync_config() {
   fi
 }
 
+agreed_base() { # $1 = rel identity, $2 = local file, $3 = cache file — the base line for one config file
+  # Same rule as record_bases(): the new hash only when local and backup agree, else the previous base.
+  if [ -f "$3" ] && ! notes_differ "$2" "$3"; then
+    printf '%s %s\n' "$(hash_note "$2")" "$1"
+  else
+    old=$(cfgbase_get "$1"); [ -n "$old" ] && printf '%s %s\n' "$old" "$1"
+  fi
+}
+
 record_config_bases() {  # snapshot the just-synced config hashes as the new 3-way base
   mkdir -p "$CFG_DIR" 2>/dev/null
-  { for f in $CONFIG_FILES; do [ -f "$CFGHOME/$f" ] && printf '%s %s\n' "$(hash_note "$CFGHOME/$f")" "$f"; done
+  { for f in $CONFIG_FILES; do [ -f "$CFGHOME/$f" ] && agreed_base "$f" "$CFGHOME/$f" "$CACHE/$f"; done
     for d in $CONFIG_TREES; do [ -d "$CFGHOME/$d" ] && ( cd "$CFGHOME" && find "$d" -type f ! -name '*.cc-conflict' 2>/dev/null ) | while IFS= read -r rp; do
-        printf '%s %s\n' "$(hash_note "$CFGHOME/$rp")" "$rp"; done; done
+        agreed_base "$rp" "$CFGHOME/$rp" "$CACHE/$rp"; done; done
     # system-level agent skills (mirrored under `agents-skills/`) + the portable install lock —
     # same relpath identities merge_one/sync_config use, so the 3-way base lines up.
-    [ -f "$AGENTS_HOME/.skill-lock.json" ] && printf '%s %s\n' "$(hash_note "$AGENTS_HOME/.skill-lock.json")" "agents-skill-lock.json"
+    [ -f "$AGENTS_HOME/.skill-lock.json" ] && agreed_base "agents-skill-lock.json" "$AGENTS_HOME/.skill-lock.json" "$CACHE/agents-skill-lock.json"
     [ -d "$AGENTS_HOME/skills" ] && ( cd "$AGENTS_HOME/skills" && find . -type f ! -name '*.cc-conflict' 2>/dev/null | sed 's#^\./##' ) | while IFS= read -r rp; do
-        printf '%s %s\n' "$(hash_note "$AGENTS_HOME/skills/$rp")" "agents-skills/$rp"; done
+        agreed_base "agents-skills/$rp" "$AGENTS_HOME/skills/$rp" "$CACHE/agents-skills/$rp"; done
     # VSCode profile (only when opted in) — same relpaths sync_config uses.
     if vscode_enabled && [ -n "$VSCODE_USER" ]; then
-      for f in $VSCODE_FILES; do [ -f "$VSCODE_USER/$f" ] && printf '%s %s\n' "$(hash_note "$VSCODE_USER/$f")" "vscode/$f"; done
+      for f in $VSCODE_FILES; do [ -f "$VSCODE_USER/$f" ] && agreed_base "vscode/$f" "$VSCODE_USER/$f" "$CACHE/vscode/$f"; done
       [ -d "$VSCODE_USER/snippets" ] && ( cd "$VSCODE_USER/snippets" && find . -type f ! -name '*.cc-conflict' 2>/dev/null | sed 's#^\./##' ) | while IFS= read -r rp; do
-          printf '%s %s\n' "$(hash_note "$VSCODE_USER/snippets/$rp")" "vscode/snippets/$rp"; done
-      [ -f "$CFG_DIR/vscode-extensions.txt" ] && printf '%s %s\n' "$(hash_note "$CFG_DIR/vscode-extensions.txt")" "vscode/extensions.txt"
+          agreed_base "vscode/snippets/$rp" "$VSCODE_USER/snippets/$rp" "$CACHE/vscode/snippets/$rp"; done
+      [ -f "$CFG_DIR/vscode-extensions.txt" ] && agreed_base "vscode/extensions.txt" "$CFG_DIR/vscode-extensions.txt" "$CACHE/vscode/extensions.txt"
     fi
   } > "$CFG_BASE.tmp" 2>/dev/null
   mv "$CFG_BASE.tmp" "$CFG_BASE" 2>/dev/null
@@ -443,6 +492,9 @@ while [ "$i" -le 3 ]; do
 
   union_merge "$CDIR" "$MEM_DIR"
   sync_config                             # global user config (CLAUDE.md, commands/skills/agents, …)
+  # Test seam: tests/sync-memory.test.sh runs a command here to stand in for a concurrent sync
+  # resetting the shared cache between this merge and its push.
+  [ -n "${CC_SYNC_TEST_AFTER_MERGE:-}" ] && eval "$CC_SYNC_TEST_AFTER_MERGE"
 
   git -C "$CACHE" add -A >/dev/null 2>&1   # stage this project's memory AND any global config changes
   if git -C "$CACHE" diff --cached --quiet 2>/dev/null; then
@@ -459,7 +511,7 @@ done
 : > "$MARKER"
 
 if [ "$synced" = 1 ]; then
-  record_bases "$MEM_DIR"                 # snapshot the just-synced content as the 3-way base
+  record_bases "$MEM_DIR" "$CDIR"         # snapshot what both sides now agree on as the 3-way base
   record_config_bases                     # …and the global-config base
   N=$(find "$MEM_DIR" -maxdepth 1 -type f -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
   C=$(find "$MEM_DIR" -maxdepth 1 -type f -name '*.conflict.md' 2>/dev/null | wc -l | tr -d ' ')
